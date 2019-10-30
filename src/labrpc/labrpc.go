@@ -58,6 +58,8 @@ import "strings"
 import "math/rand"
 import "time"
 import "sync/atomic"
+import "fmt"
+import "runtime"
 
 type reqMsg struct {
 	endname  interface{} // name of sending ClientEnd
@@ -78,6 +80,20 @@ type ClientEnd struct {
 	done    chan struct{} // closed when Network is cleaned up
 }
 
+func CallStack(maxStack int) {
+	var str string
+	i := 1
+	for {
+		pc, file, line, ok := runtime.Caller(i)
+		if !ok || i > maxStack {
+			break
+		}
+		str += fmt.Sprintf("    stack: %d %v [file: %s] [func: %s] [line: %d]\n", i-1, ok, file, runtime.FuncForPC(pc).Name(), line)
+		i++
+	}
+	fmt.Println(str)
+}
+
 // send an RPC, wait for the reply.
 // the return value indicates success; false means that
 // no reply was received from the server.
@@ -96,6 +112,7 @@ func (e *ClientEnd) Call(svcMeth string, args interface{}, reply interface{}) bo
 	select {
 	case e.ch <- req:
 		// ok
+		fmt.Println("Call", svcMeth, "OK")
 	case <-e.done:
 		return false
 	}
@@ -205,9 +222,11 @@ func (rn *Network) IsServerDead(endname interface{}, servername interface{}, ser
 }
 
 func (rn *Network) ProcessReq(req reqMsg) {
+
 	enabled, servername, server, reliable, longreordering := rn.ReadEndnameInfo(req.endname)
 
 	if enabled && servername != nil && server != nil {
+
 		if reliable == false {
 			// short delay
 			ms := (rand.Int() % 27)
@@ -277,6 +296,7 @@ func (rn *Network) ProcessReq(req reqMsg) {
 			req.replyCh <- reply
 		}
 	} else {
+		fmt.Println(2)
 		// simulate no reply and eventual timeout.
 		ms := 0
 		if rn.longDelays {
@@ -341,6 +361,7 @@ func (rn *Network) Connect(endname interface{}, servername interface{}) {
 
 // enable/disable a ClientEnd.
 func (rn *Network) Enable(endname interface{}, enabled bool) {
+
 	rn.mu.Lock()
 	defer rn.mu.Unlock()
 
