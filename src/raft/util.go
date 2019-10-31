@@ -14,5 +14,8 @@ func DPrintf(format string, a ...interface{}) (n int, err error) {
 }
 
 func randBetween(min int, max int) int {
-	return rand.Int()%max + min
+	if max < min {
+		max = min
+	}
+	return min + rand.Intn(max-min)
 }

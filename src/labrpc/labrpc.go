@@ -112,7 +112,7 @@ func (e *ClientEnd) Call(svcMeth string, args interface{}, reply interface{}) bo
 	select {
 	case e.ch <- req:
 		// ok
-		fmt.Println("Call", svcMeth, "OK")
+		//fmt.Println("Call", svcMeth, "OK")
 	case <-e.done:
 		return false
 	}
@@ -296,7 +296,6 @@ func (rn *Network) ProcessReq(req reqMsg) {
 			req.replyCh <- reply
 		}
 	} else {
-		fmt.Println(2)
 		// simulate no reply and eventual timeout.
 		ms := 0
 		if rn.longDelays {

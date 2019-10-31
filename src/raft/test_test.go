@@ -48,7 +48,6 @@ func TestInitialElection2A(t *testing.T) {
 	cfg.end()
 }
 
-/*
 func TestReElection2A(t *testing.T) {
 	servers := 3
 	cfg := make_config(t, servers, false)
@@ -56,35 +55,49 @@ func TestReElection2A(t *testing.T) {
 
 	cfg.begin("Test (2A): election after network failure")
 
+	fmt.Println("phase1-------------")
+
 	leader1 := cfg.checkOneLeader()
 
 	// if the leader disconnects, a new one should be elected.
 	cfg.disconnect(leader1)
+
+	fmt.Println("phase2-------------")
 	cfg.checkOneLeader()
 
 	// if the old leader rejoins, that shouldn't
 	// disturb the new leader.
 	cfg.connect(leader1)
+	fmt.Println(leader1, "rejoins")
+	fmt.Println("phase3-------------")
 	leader2 := cfg.checkOneLeader()
+	//time.Sleep(2 * RaftElectionTimeout)
 
 	// if there's no quorum, no leader should
 	// be elected.
+	fmt.Println(leader2, "disconnect")
 	cfg.disconnect(leader2)
 	cfg.disconnect((leader2 + 1) % servers)
+
+	fmt.Println("begin sleep")
 	time.Sleep(2 * RaftElectionTimeout)
+	fmt.Println("phase4-------------")
 	cfg.checkNoLeader()
 
 	// if a quorum arises, it should elect a leader.
 	cfg.connect((leader2 + 1) % servers)
+	fmt.Println("phase5-------------")
 	cfg.checkOneLeader()
 
 	// re-join of last node shouldn't prevent leader from existing.
 	cfg.connect(leader2)
+	fmt.Println("phase6-------------")
 	cfg.checkOneLeader()
 
 	cfg.end()
 }
 
+/*
 func TestBasicAgree2B(t *testing.T) {
 	servers := 5
 	cfg := make_config(t, servers, false)

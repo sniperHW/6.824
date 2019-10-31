@@ -241,6 +241,7 @@ func (cfg *config) connect(i int) {
 	for j := 0; j < cfg.n; j++ {
 		if cfg.connected[j] {
 			endname := cfg.endnames[i][j]
+			//fmt.Println(i, "enable outgoing", j)
 			cfg.net.Enable(endname, true)
 		}
 	}
@@ -249,6 +250,7 @@ func (cfg *config) connect(i int) {
 	for j := 0; j < cfg.n; j++ {
 		if cfg.connected[j] {
 			endname := cfg.endnames[j][i]
+			//fmt.Println(i, "enable incoming", j)
 			cfg.net.Enable(endname, true)
 		}
 	}

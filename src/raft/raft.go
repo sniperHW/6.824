@@ -57,7 +57,7 @@ type logEntry struct {
 var (
 	electionTimeoutMin = 300
 	electionTimeoutMax = 500
-	heartbeatInterval  = 100
+	heartbeatInterval  = 50
 )
 
 var (
@@ -73,15 +73,110 @@ type peerMsg struct {
 }
 
 type peer struct {
+	id              int
+	mu              sync.Mutex
 	nextIndex       int
 	matchIndex      int
 	end             *labrpc.ClientEnd
 	lastCommunicate time.Time
+	stopCh          chan struct{}
+	wakeCh          chan struct{}
 }
 
-func (p *peer) Call(svcMeth string, args interface{}, reply interface{}) bool {
+func (p *peer) wakeup() {
+	select {
+	case p.wakeCh <- struct{}{}:
+	default:
+	}
+}
+
+func (p *peer) stop() {
+	select {
+	case p.stopCh <- struct{}{}:
+	default:
+	}
+}
+
+func (p *peer) call(svcMeth string, args interface{}, reply interface{}) bool {
+	p.mu.Lock()
 	p.lastCommunicate = time.Now()
+	p.mu.Unlock()
+
 	return p.end.Call(svcMeth, args, reply)
+}
+
+func (p *peer) appendEntrys(rf *Raft) bool {
+	return false
+}
+
+func (p *peer) process(rf *Raft, heartbeatTimer *time.Timer) {
+
+	if nil != heartbeatTimer {
+		heartbeatTimer.Stop()
+	}
+
+	if p.matchIndex == p.nextIndex-1 {
+		//没有entry需要复制，发送心跳
+		rf.mu.Lock()
+		heartbeat := &RequestAppendEntrysArgs{
+			Term:         rf.currentTerm,
+			LeaderId:     rf.me,
+			LeaderCommit: rf.commitIndex,
+		}
+		rf.mu.Unlock()
+
+		go func() {
+			reply := &RequestAppendEntrysReply{}
+			ok := rf.sendAppendEntrys(p.id, heartbeat, reply)
+			if ok && reply.Term > heartbeat.Term {
+				rf.mu.Lock()
+				rf.becomeFollower(reply.Term)
+				rf.mu.Unlock()
+			}
+		}()
+
+	} else {
+
+	}
+
+	if nil != heartbeatTimer {
+		//重置定时器
+		heartbeatTimer.Reset(p.getSleepTime())
+	}
+}
+
+func (p *peer) getSleepTime() time.Duration {
+	return time.Millisecond * time.Duration(heartbeatInterval)
+}
+
+func (p *peer) run(rf *Raft, matchIndex, nextIndex int) {
+
+	fmt.Println("leader", rf.me, "peer", p.id, "run")
+
+	p.matchIndex = matchIndex
+	p.nextIndex = nextIndex
+
+	p.process(rf, nil)
+
+	heartbeatTimer := time.AfterFunc(p.getSleepTime(), func() {
+		p.wakeup()
+	})
+
+	endLoop := false
+
+	for !endLoop {
+		select {
+		case <-p.stopCh:
+			endLoop = true
+			break
+		case <-p.wakeCh:
+			p.process(rf, heartbeatTimer)
+		}
+	}
+
+	heartbeatTimer.Stop()
+
+	fmt.Println("leader", rf.me, "peer", p.id, "stop")
 }
 
 type Raft struct {
@@ -100,13 +195,11 @@ type Raft struct {
 	commitIndex int
 	lastApplied int
 
-	voteNum int
+	voteFrom map[int]bool
 
 	role int
 
 	electionTimer *time.Timer
-
-	//eventCh chan interface{}
 
 	// Your data here (2A, 2B, 2C).
 	// Look at the paper's Figure 2 for a description of what
@@ -115,7 +208,9 @@ type Raft struct {
 
 func (rf *Raft) resetElectionTimer() {
 
-	timeout := time.Duration(randBetween(electionTimeoutMin, electionTimeoutMax)) * time.Millisecond
+	t := randBetween(electionTimeoutMin, electionTimeoutMax)
+
+	timeout := time.Duration(t) * time.Millisecond
 
 	if nil == rf.electionTimer {
 		rf.electionTimer = time.AfterFunc(timeout, rf.onElectionTimeout)
@@ -126,6 +221,7 @@ func (rf *Raft) resetElectionTimer() {
 }
 
 func (rf *Raft) stopElectionTimer() bool {
+
 	if nil != rf.electionTimer {
 		return rf.electionTimer.Stop()
 	} else {
@@ -143,7 +239,7 @@ func (rf *Raft) GetState() (int, bool) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 
-	return rf.currentTerm, rf.leader == rf.me
+	return rf.currentTerm, rf.role == roleLeader //rf.leader == rf.me
 }
 
 //
@@ -221,8 +317,13 @@ type RequestAppendEntrysReply struct {
 }
 
 func (rf *Raft) onElectionTimeout() {
-	fmt.Println("onElectionTimeout")
-	rf.becomeCandidate()
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+	if rf.role == roleCandidate {
+		rf.becomeFollower(rf.currentTerm)
+	} else {
+		rf.becomeCandidate()
+	}
 }
 
 //
@@ -230,51 +331,60 @@ func (rf *Raft) onElectionTimeout() {
 //
 func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	// Your code here (2A, 2B).
+
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 
-	if rf.role == roleLeader && args.Term > rf.currentTerm {
-		//leader发现更大的term,becomeFollower
-		rf.becomeFollower()
-	}
+	if rf.role == roleLeader {
+		if args.Term > rf.currentTerm {
+			//leader发现更大的term,becomeFollower
+			rf.becomeFollower(args.Term)
+		} else {
+			reply.VoteGranted = false
+			reply.Term = rf.currentTerm
+			return
+		}
+	} else {
 
-	if args.Term < rf.currentTerm {
-		//收到更小的term,拒绝同时把自身term返回
-		reply.Term = rf.currentTerm
-		reply.VoteGranted = false
-		return
-	} else if rf.votedFor != nil && *rf.votedFor != args.CandidateId {
-		//已经投过票了
-		reply.VoteGranted = false
-		reply.Term = rf.currentTerm
-		return
-	}
+		if args.Term < rf.currentTerm {
+			//收到更小的term,拒绝同时把自身term返回
+			reply.Term = rf.currentTerm
+			reply.VoteGranted = false
+			return
+		} else if args.Term > rf.currentTerm {
+			rf.becomeFollower(args.Term)
+		} else if rf.votedFor != nil && *rf.votedFor != args.CandidateId {
+			//已经投过票了
+			reply.VoteGranted = false
+			reply.Term = rf.currentTerm
+			return
+		}
 
-	lastLogTerm := 0
-	lastLogIndex := 0
-	lastEntry := rf.getLastEntry()
-	if nil != lastEntry {
-		lastLogTerm = lastEntry.Index
-		lastLogTerm = lastEntry.Term
-	}
+		lastLogTerm := 0
+		lastLogIndex := 0
+		lastEntry := rf.getLastEntry()
+		if nil != lastEntry {
+			lastLogTerm = lastEntry.Index
+			lastLogTerm = lastEntry.Term
+		}
 
-	if lastLogTerm == args.LastLogTerm {
-		if lastLogIndex > args.LastLogIndex {
+		if lastLogTerm == args.LastLogTerm {
+			if lastLogIndex > args.LastLogIndex {
+				reply.Term = rf.currentTerm
+				reply.VoteGranted = false
+				return
+			}
+		} else if lastLogTerm > args.LastLogTerm {
 			reply.Term = rf.currentTerm
 			reply.VoteGranted = false
 			return
 		}
-	} else if lastLogTerm > args.LastLogTerm {
-		reply.Term = rf.currentTerm
-		reply.VoteGranted = false
-		return
-	}
 
-	//可以支持
-	rf.votedFor = &args.CandidateId
-	rf.currentTerm = args.Term
-	reply.Term = rf.currentTerm
-	reply.VoteGranted = true
+		//可以支持
+		rf.votedFor = &args.CandidateId
+		reply.Term = rf.currentTerm
+		reply.VoteGranted = true
+	}
 
 }
 
@@ -308,9 +418,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 // the struct itself.
 //
 func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *RequestVoteReply) bool {
-	fmt.Println("sendRequestVote")
-	ok := rf.peers[server].Call("Raft.RequestVote", args, reply)
-	return ok
+	return rf.peers[server].call("Raft.RequestVote", args, reply)
 }
 
 func (rf *Raft) getEntryByIndex(index int) *logEntry {
@@ -322,24 +430,26 @@ func (rf *Raft) getEntryByIndex(index int) *logEntry {
 }
 
 func (rf *Raft) AppendEntrys(args *RequestAppendEntrysArgs, reply *RequestAppendEntrysReply) {
-	fmt.Println("AppendEntrys")
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 	if args.Term < rf.currentTerm {
 		reply.Term = rf.currentTerm
 		reply.Success = false
 		return
-	}
-
-	//收到leader消息，更新election定时器
-	if rf.role == roleCandidate {
-		rf.becomeFollower()
+	} else if args.Term > rf.currentTerm {
+		//任何情况下发现更大的term,立刻更新term,并转换成follower
+		rf.becomeFollower(args.Term)
 	} else {
-		rf.resetElectionTimer()
+		if rf.role == roleLeader {
+			reply.Success = false
+			reply.Term = rf.currentTerm
+			return
+		} else if rf.role == roleCandidate {
+			rf.becomeFollower(args.Term)
+		} else {
+			rf.resetElectionTimer()
+		}
 	}
-
-	//尚未定时发送heartbeat,所以先关掉ElectionTimer
-	rf.stopElectionTimer()
 
 	if nil != args.Entries && len(args.Entries) > 0 {
 		entry := rf.getEntryByIndex(args.PrevLogIndex)
@@ -367,9 +477,7 @@ func (rf *Raft) AppendEntrys(args *RequestAppendEntrysArgs, reply *RequestAppend
 }
 
 func (rf *Raft) sendAppendEntrys(server int, args *RequestAppendEntrysArgs, reply *RequestAppendEntrysReply) bool {
-	fmt.Println("sendAppendEntrys")
-	ok := rf.peers[server].Call("Raft.AppendEntrys", args, reply)
-	return ok
+	return rf.peers[server].call("Raft.AppendEntrys", args, reply)
 }
 
 func (rf *Raft) getLastEntry() *logEntry {
@@ -378,21 +486,6 @@ func (rf *Raft) getLastEntry() *logEntry {
 		return &rf.log[l-1]
 	} else {
 		return nil
-	}
-}
-
-func (rf *Raft) sendHeartbeat() {
-	heartbeat := &RequestAppendEntrysArgs{
-		Term:         rf.currentTerm,
-		LeaderId:     rf.me,
-		LeaderCommit: rf.commitIndex,
-	}
-
-	for k, _ := range rf.peers {
-		if k != rf.me {
-			//heartbeat不关心reply
-			go rf.sendAppendEntrys(k, heartbeat, &RequestAppendEntrysReply{})
-		}
 	}
 }
 
@@ -411,21 +504,25 @@ func (rf *Raft) vote(server int, term int, lastEntry *logEntry) {
 
 	rf.sendRequestVote(server, request, reply)
 
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+
 	if reply.VoteGranted {
-		fmt.Println("got vote from", server, term)
-		rf.mu.Lock()
-		rf.voteNum++
-		if rf.voteNum > len(rf.peers)/2 {
-			//获得多数集的支持
-			rf.becomeLeader()
+		if rf.role == roleCandidate {
+			fmt.Println(rf.me, "got vote from", server, "at term", term)
+			rf.voteFrom[server] = true
+			if len(rf.voteFrom) > len(rf.peers)/2 {
+				//获得多数集的支持
+				rf.becomeLeader()
+			}
 		}
-		rf.mu.Unlock()
 	} else {
-		rf.mu.Lock()
 		if reply.Term >= rf.currentTerm {
 			rf.currentTerm = reply.Term
+			if rf.role == roleLeader {
+				rf.becomeFollower(reply.Term)
+			}
 		}
-		rf.mu.Unlock()
 	}
 }
 
@@ -463,25 +560,42 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 //
 func (rf *Raft) Kill() {
 	// Your code here, if desired.
+	for k, v := range rf.peers {
+		if k != rf.me {
+			v.stop()
+		}
+	}
+	rf.stopElectionTimer()
 }
 
-func (rf *Raft) becomeFollower() {
+func (rf *Raft) becomeFollower(term int) {
+	fmt.Println(rf.me, "becomeFollower", "at term", term)
+	if rf.role == roleLeader {
+		fmt.Println("leader to follower", rf.me)
+		for k, v := range rf.peers {
+			if k != rf.me {
+				v.stop()
+			}
+		}
+	}
 	rf.votedFor = nil
 	rf.role = roleFollower
+	rf.currentTerm = term
+	rf.voteFrom = make(map[int]bool)
 	rf.resetElectionTimer()
 }
 
 func (rf *Raft) becomeCandidate() {
 	var term int
 	var lastEntry *logEntry
-	rf.mu.Lock()
-	rf.votedFor = nil
 	rf.role = roleCandidate
 	rf.currentTerm++
-	rf.voteNum = 1 //先给自己投一票
+	fmt.Println(rf.me, "becomeCandidate", "term", rf.currentTerm, time.Now())
+	//给自己投票
+	rf.votedFor = &rf.me
+	rf.voteFrom[rf.me] = true
 	term = rf.currentTerm
 	lastEntry = rf.getLastEntry()
-	rf.mu.Unlock()
 	rf.resetElectionTimer()
 	//向除自己以外的peer发送vote
 	for k, _ := range rf.peers {
@@ -492,9 +606,9 @@ func (rf *Raft) becomeCandidate() {
 }
 
 func (rf *Raft) becomeLeader() {
-	if rf.stopElectionTimer() {
+	if rf.stopElectionTimer() && rf.role == roleCandidate {
 
-		fmt.Println("becomeLeader", rf.me)
+		fmt.Println(rf.me, "becomeLeader", "at term", rf.currentTerm)
 		rf.role = roleLeader
 		rf.leader = rf.me
 		nextIndex := 1
@@ -505,12 +619,9 @@ func (rf *Raft) becomeLeader() {
 
 		for k, v := range rf.peers {
 			if k != rf.me {
-				v.matchIndex = 0
-				v.nextIndex = nextIndex
+				go v.run(rf, 0, nextIndex)
 			}
 		}
-
-		go rf.sendHeartbeat()
 	}
 }
 
@@ -535,19 +646,25 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.leader = -1
 	rf.log = append([]logEntry{}, logEntry{})
 	rf.peers = make([]*peer, len(peers), len(peers))
+	rf.voteFrom = make(map[int]bool)
 
 	for k, v := range peers {
 		rf.peers[k] = &peer{
+			id:              k,
 			nextIndex:       1,
 			matchIndex:      0,
 			end:             v,
 			lastCommunicate: time.Now(),
+			stopCh:          make(chan struct{}, 1),
+			wakeCh:          make(chan struct{}, 1),
 		}
 	}
 	// initialize from state persisted before a crash
 	rf.readPersist(persister.ReadRaftState())
 
-	rf.becomeFollower()
+	rf.mu.Lock()
+	rf.becomeFollower(rf.currentTerm)
+	rf.mu.Unlock()
 
 	return rf
 }
