@@ -81,8 +81,7 @@ type peer struct {
 	matchIndex      int
 	end             *labrpc.ClientEnd
 	lastCommunicate time.Time
-	//stopCh          chan struct{}
-	//wakeCh          chan struct{}
+	match           bool //match设置成true前不会发送entry
 }
 
 func (p *peer) call(svcMeth string, args interface{}, reply interface{}) bool {
@@ -147,6 +146,7 @@ func (rf *Raft) updateTerm(term int) {
 }
 
 func (rf *Raft) updateRole(role int) {
+	//fmt.Println(rf.me, "updateRole", role)
 	rf.role = role
 }
 
@@ -367,7 +367,7 @@ func (rf *Raft) onRequestVoteReply(p *peer, ok bool, args *RequestVoteArgs, repl
 	if ok {
 		if reply.VoteGranted {
 			if rf.role == roleCandidate {
-				fmt.Println(rf.me, "got vote from", p.id, "at term", rf.currentTerm)
+				//fmt.Println(rf.me, "got vote from", p.id, "at term", rf.currentTerm)
 				rf.voteFrom[p.id] = true
 				if len(rf.voteFrom) > len(rf.peers)/2 {
 					//获得多数集的支持
@@ -403,12 +403,14 @@ func (rf *Raft) AppendEntrys(args *RequestAppendEntrysArgs, reply *RequestAppend
 	if args.Term < rf.currentTerm {
 		reply.Term = rf.currentTerm
 		reply.Success = false
+		fmt.Println(rf.me, "reject 1")
 		return
 	} else if args.Term > rf.currentTerm {
 		//任何情况下发现更大的term,立刻更新term,并转换成follower
 		rf.becomeFollower(args.Term)
 	} else {
 		if rf.role == roleLeader {
+			fmt.Println(rf.me, "reject 2")
 			reply.Success = false
 			reply.Term = rf.currentTerm
 			return
@@ -419,27 +421,43 @@ func (rf *Raft) AppendEntrys(args *RequestAppendEntrysArgs, reply *RequestAppend
 		}
 	}
 
-	if nil != args.Entries && len(args.Entries) > 0 {
-		entry := rf.getEntryByIndex(args.PrevLogIndex)
-		if nil == entry || entry.Term != args.PrevLogTerm {
-			//没有通过一致性检查
-			if nil == entry {
-				reply.Term = 0
-			} else {
-				reply.Term = entry.Term
+	if args.LeaderCommit >= rf.commitIndex {
+		if nil != args.Entries && len(args.Entries) > 0 {
+			if args.PrevLogIndex > 0 {
+				entry := rf.getEntryByIndex(args.PrevLogIndex)
+				if nil == entry || entry.Term != args.PrevLogTerm {
+					//没有通过一致性检查
+					if nil == entry {
+						reply.Term = 0
+					} else {
+						reply.Term = entry.Term
+					}
+					fmt.Println(rf.me, "reject 3", entry, args.PrevLogIndex, args.PrevLogTerm)
+					reply.Success = false
+					return
+				}
 			}
-			reply.Success = false
-			return
+
+			//将args.PrevLogIndex之后的日志删除
+			rf.log = rf.log[0:args.PrevLogIndex]
+
+			//将entry添加到本地log
+			for _, v := range args.Entries {
+				rf.log = append(rf.log, v)
+			}
 		}
 
-		//将entry添加到本地log
-		for _, v := range args.Entries {
-			rf.log = append(rf.log, v)
+		rf.updateLeader(args.LeaderId)
+
+		if rf.commitIndex != args.LeaderCommit {
+			fmt.Println("follower commitIndex", args.LeaderCommit)
 		}
+
+		rf.commitIndex = args.LeaderCommit
+	} else {
+		//重复消息
 	}
 
-	rf.updateLeader(args.LeaderId)
-	rf.commitIndex = args.LeaderCommit
 	reply.Success = true
 	reply.Term = rf.currentTerm
 }
@@ -448,8 +466,27 @@ func (rf *Raft) sendAppendEntrys(server int, args *RequestAppendEntrysArgs, repl
 	p := rf.peers[server]
 	go func() {
 		ok := p.call("Raft.AppendEntrys", args, reply)
+		/*if nil != args.Entries {
+			fmt.Println(rf.me, "send entrys", "to", server, ok)
+		}*/
 		rf.onAppendEntrysReply(p, ok, args, reply)
 	}()
+}
+
+func (rf *Raft) updateCommited(index int) {
+	if index != rf.commitIndex {
+		agreeCount := 0
+		for _, v := range rf.peers {
+			if v.matchIndex == index {
+				agreeCount++
+			}
+		}
+
+		if agreeCount > len(rf.peers)/2 {
+			rf.commitIndex = index
+			fmt.Println("commitIndex", index)
+		}
+	}
 }
 
 func (rf *Raft) onAppendEntrysReply(p *peer, ok bool, args *RequestAppendEntrysArgs, reply *RequestAppendEntrysReply) {
@@ -459,6 +496,36 @@ func (rf *Raft) onAppendEntrysReply(p *peer, ok bool, args *RequestAppendEntrysA
 		if reply.Term > rf.currentTerm {
 			//found large term,become follower
 			rf.becomeFollower(reply.Term)
+		} else {
+			if rf.role == roleLeader {
+				if reply.Success {
+					p.match = true
+					//复制成功，更新nextindex和matchindex
+					if nil != args.Entries && len(args.Entries) > 0 {
+						lastEntry := args.Entries[len(args.Entries)-1]
+						p.nextIndex = lastEntry.Index + 1
+						if lastEntry.Term == rf.currentTerm {
+							rf.updateCommited(lastEntry.Index)
+						}
+					}
+					p.matchIndex = p.nextIndex - 1
+					if p.nextIndex != len(rf.log)+1 {
+						request := rf.prepareAppendEntriesRequest(p)
+						reply := &RequestAppendEntrysReply{}
+						rf.sendAppendEntrys(p.id, request, reply)
+					}
+				} else {
+
+					fmt.Println("onAppendEntrysReply failed", rf.me, p.id, reply.Term)
+
+					//follower与leader不匹配，需要调整nextIndex重试
+					//把nextIndex-1,暂不考虑优化
+					p.nextIndex--
+					request := rf.prepareAppendEntriesRequest(p)
+					reply := &RequestAppendEntrysReply{}
+					rf.sendAppendEntrys(p.id, request, reply)
+				}
+			}
 		}
 	}
 }
@@ -492,8 +559,34 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	isLeader := true
 
 	// Your code here (2B).
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
 
-	fmt.Println("start", rf.me)
+	fmt.Println("Start", rf.me)
+
+	if rf.role != roleLeader {
+		return index, term, false
+	}
+
+	index = 1
+
+	lastEntry := rf.getLastEntry()
+
+	if nil != lastEntry {
+		index = lastEntry.Index + 1
+	}
+
+	term = rf.currentTerm
+
+	fmt.Println(rf.me, "AppendEntrys", term, index)
+
+	rf.log = append(rf.log, logEntry{
+		Index:   index,
+		Term:    term,
+		Command: command,
+	})
+
+	rf.persist()
 
 	return index, term, isLeader
 }
@@ -564,26 +657,28 @@ func (rf *Raft) becomeLeader() {
 	rf.updateRole(roleLeader)
 	rf.leader = rf.me
 
-	rf.clearElectionTimeout()
-	rf.updateRole(roleLeader)
-	rf.leader = rf.me
+	//begin log replicate
+
+	//第一个请求不带entrise,检查follower的日志与leader是否一致
+	request := &RequestAppendEntrysArgs{
+		Term:         rf.currentTerm,
+		LeaderId:     rf.me,
+		LeaderCommit: rf.commitIndex,
+	}
 
 	nextIndex := 1
 	lastEntry := rf.getLastEntry()
 	if nil != lastEntry {
 		nextIndex = lastEntry.Index
+		request.PrevLogIndex = lastEntry.Index
+		request.PrevLogTerm = lastEntry.Term
 	}
 
-	//begin log replicate
 	for _, v := range rf.peers {
 		if v.id != rf.me {
 			v.nextIndex = nextIndex
 			v.matchIndex = 0
-			request := &RequestAppendEntrysArgs{
-				Term:         rf.currentTerm,
-				LeaderId:     rf.me,
-				LeaderCommit: rf.commitIndex,
-			}
+			v.match = false
 			reply := &RequestAppendEntrysReply{}
 			rf.sendAppendEntrys(v.id, request, reply)
 		}
@@ -605,22 +700,44 @@ func (rf *Raft) clearElectionTimeout() {
 }
 
 func (rf *Raft) prepareAppendEntriesRequest(p *peer) *RequestAppendEntrysArgs {
-	rf.mu.Lock()
-	defer rf.mu.Unlock()
-	if p.matchIndex == p.nextIndex-1 {
+
+	//if p.matchIndex == p.nextIndex-1 {
+
+	if p.nextIndex >= len(rf.log) {
+		//fmt.Println("send heartbeat only", p.id, len(rf.log), p.matchIndex, p.nextIndex)
 		//没有entry需要复制，发送心跳
 		return &RequestAppendEntrysArgs{
 			Term:         rf.currentTerm,
 			LeaderId:     rf.me,
 			LeaderCommit: rf.commitIndex,
 		}
-
 	} else {
-		return &RequestAppendEntrysArgs{
+
+		//fmt.Println(rf.me, p.matchIndex, p.nextIndex)
+
+		preEntry := rf.log[p.nextIndex-1]
+
+		request := &RequestAppendEntrysArgs{
 			Term:         rf.currentTerm,
 			LeaderId:     rf.me,
 			LeaderCommit: rf.commitIndex,
+			PrevLogIndex: preEntry.Index,
+			PrevLogTerm:  preEntry.Term,
 		}
+
+		if p.match {
+			//如果只是检测日志是否匹配，不附带entry
+			count := len(rf.log) - p.nextIndex
+
+			//fmt.Println("count", count, len(rf.log), p.nextIndex)
+
+			request.Entries = make([]logEntry, count)
+			for i := p.nextIndex - 1; i < len(rf.log); i++ {
+				request.Entries = append(request.Entries, rf.log[i])
+			}
+		}
+
+		return request
 	}
 }
 
@@ -628,28 +745,19 @@ func (rf *Raft) tick() {
 
 	now := time.Now()
 
-	if !func() bool {
-		rf.mu.Lock()
-		defer rf.mu.Unlock()
-		if !rf.electionTimeout.IsZero() && now.After(rf.electionTimeout) {
-			if rf.role == roleCandidate {
-				rf.becomeFollower(rf.currentTerm)
-				return false
-			} else if rf.role == roleFollower {
-				rf.becomeCandidate()
-				return false
-			}
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+	if !rf.electionTimeout.IsZero() && now.After(rf.electionTimeout) {
+		if rf.role == roleCandidate {
+			rf.becomeFollower(rf.currentTerm)
+			return
+		} else if rf.role == roleFollower {
+			rf.becomeCandidate()
+			return
 		}
-		return true
-	}() {
-		return
 	}
 
-	rf.mu.Lock()
-	if rf.role != roleLeader {
-		rf.mu.Unlock()
-	} else {
-		rf.mu.Unlock()
+	if rf.role == roleLeader {
 		for _, v := range rf.peers {
 			if v.id != rf.me && v.heartbeatTimeout(now) {
 				request := rf.prepareAppendEntriesRequest(v)
