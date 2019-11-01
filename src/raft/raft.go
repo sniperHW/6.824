@@ -439,18 +439,20 @@ func (rf *Raft) AppendEntrys(args *RequestAppendEntrysArgs, reply *RequestAppend
 			}
 
 			//将args.PrevLogIndex之后的日志删除
-			rf.log = rf.log[0:args.PrevLogIndex]
+			rf.log = rf.log[0 : args.PrevLogIndex+1]
 
 			//将entry添加到本地log
 			for _, v := range args.Entries {
 				rf.log = append(rf.log, v)
 			}
+
+			//fmt.Println("count", len(args.Entries), args.PrevLogIndex, len(rf.log), rf.log[1])
 		}
 
 		rf.updateLeader(args.LeaderId)
 
 		if rf.commitIndex != args.LeaderCommit {
-			fmt.Println("follower commitIndex", args.LeaderCommit)
+			fmt.Println(rf.me, "follower commitIndex", args.LeaderCommit, len(rf.log), rf.log[1])
 		}
 
 		rf.commitIndex = args.LeaderCommit
@@ -466,9 +468,9 @@ func (rf *Raft) sendAppendEntrys(server int, args *RequestAppendEntrysArgs, repl
 	p := rf.peers[server]
 	go func() {
 		ok := p.call("Raft.AppendEntrys", args, reply)
-		/*if nil != args.Entries {
-			fmt.Println(rf.me, "send entrys", "to", server, ok)
-		}*/
+		//if nil != args.Entries {
+		//	fmt.Println(rf.me, "send entrys", "to", server, ok, len(args.Entries))
+		//}
 		rf.onAppendEntrysReply(p, ok, args, reply)
 	}()
 }
@@ -728,13 +730,14 @@ func (rf *Raft) prepareAppendEntriesRequest(p *peer) *RequestAppendEntrysArgs {
 		if p.match {
 			//如果只是检测日志是否匹配，不附带entry
 			count := len(rf.log) - p.nextIndex
-
-			//fmt.Println("count", count, len(rf.log), p.nextIndex)
-
-			request.Entries = make([]logEntry, count)
-			for i := p.nextIndex - 1; i < len(rf.log); i++ {
+			request.Entries = make([]logEntry, 0, count)
+			for i := p.nextIndex; i < len(rf.log); i++ {
+				//fmt.Println("i", i)
 				request.Entries = append(request.Entries, rf.log[i])
 			}
+
+			//fmt.Println("prepareAppendEntriesRequest count", count, len(rf.log), p.nextIndex, request.PrevLogIndex, len(request.Entries))
+
 		}
 
 		return request
