@@ -426,12 +426,9 @@ func (rf *Raft) AppendEntrys(args *RequestAppendEntrysArgs, reply *RequestAppend
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 
-	//fmt.Println(rf.me, "recv AppendEntrys from", args.LeaderId, "at term", args.Term)
-
 	if args.Term < rf.currentTerm {
 		reply.Term = rf.currentTerm
 		reply.Success = false
-		//fmt.Println(rf.me, "reject1 from", args.LeaderId, "self.Term", rf.currentTerm, "other term", args.Term)
 		return
 	} else if args.Term > rf.currentTerm {
 		//任何情况下发现更大的term,立刻更新term,并转换成follower
@@ -449,7 +446,6 @@ func (rf *Raft) AppendEntrys(args *RequestAppendEntrysArgs, reply *RequestAppend
 		}
 	}
 
-	//fmt.Println(rf.me, "AppendEntrys", args.LeaderCommit, args.Entries)
 	entry := rf.getEntryByIndex(args.PrevLogIndex)
 
 	if nil == entry || entry.Term != args.PrevLogTerm {
@@ -498,7 +494,6 @@ func (rf *Raft) AppendEntrys(args *RequestAppendEntrysArgs, reply *RequestAppend
 func (rf *Raft) sendAppendEntrys(server int, args *RequestAppendEntrysArgs, reply *RequestAppendEntrysReply) {
 	p := rf.peers[server]
 	go func() {
-		//fmt.Println(rf.me, "sendAppendEntrys to", server, time.Now())
 		ok := p.call("Raft.AppendEntrys", args, reply)
 		rf.onAppendEntrysReply(p, ok, args, reply)
 	}()
@@ -529,7 +524,6 @@ func (rf *Raft) updateCommited(index int) {
 		if agreeCount > len(rf.peers)/2 {
 			rf.commitIndex = index
 			rf.doApply()
-			//fmt.Println(rf.me, "commitIndex", index, rf.log)
 		}
 	}
 }
@@ -659,8 +653,6 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 // turn off debug output from this instance.
 //
 func (rf *Raft) Kill() {
-	fmt.Println(rf.me, "Kill")
-
 	// Your code here, if desired.
 	select {
 	case rf.stopCh <- struct{}{}:
@@ -679,6 +671,7 @@ func (rf *Raft) becomeFollower(term int) {
 	rf.leader = -1
 	rf.votedFor = nil
 	rf.voteFrom = make(map[int]bool)
+	rf.persist()
 }
 
 func (rf *Raft) becomeCandidate() {
@@ -693,6 +686,7 @@ func (rf *Raft) becomeCandidate() {
 	//给自己投票
 	rf.votedFor = &rf.me
 	rf.voteFrom[rf.me] = true
+	rf.persist()
 
 	lastEntry := rf.getLastEntry()
 
@@ -750,13 +744,7 @@ func (rf *Raft) becomeLeader() {
 }
 
 func (rf *Raft) resetElectionTimeout() {
-
-	t := randBetween(electionTimeoutMin, electionTimeoutMax)
-
-	timeout := time.Duration(t) * time.Millisecond
-
-	rf.electionTimeout = time.Now().Add(timeout)
-
+	rf.electionTimeout = time.Now().Add(time.Duration(randBetween(electionTimeoutMin, electionTimeoutMax)) * time.Millisecond)
 }
 
 func (rf *Raft) clearElectionTimeout() {
@@ -764,9 +752,6 @@ func (rf *Raft) clearElectionTimeout() {
 }
 
 func (rf *Raft) prepareAppendEntriesRequest(p *peer) *RequestAppendEntrysArgs {
-
-	//if p.matchIndex == p.nextIndex-1 {
-
 	if p.nextIndex >= len(rf.log) {
 		//fmt.Println("send heartbeat only", p.id, len(rf.log), p.matchIndex, p.nextIndex)
 		//没有entry需要复制，发送心跳
@@ -810,11 +795,8 @@ func (rf *Raft) prepareAppendEntriesRequest(p *peer) *RequestAppendEntrysArgs {
 			for i := p.nextIndex; i < len(rf.log); i++ {
 				request.Entries = append(request.Entries, rf.log[i])
 			}
-
 			//fmt.Println(rf.me, "prepareAppendEntriesRequest to", p.id, request.Entries, p.nextIndex, len(rf.log))
-
 		}
-
 		return request
 	}
 }
@@ -898,7 +880,6 @@ EndMainRountine:
 func Make(peers []*labrpc.ClientEnd, me int,
 	persister *Persister, applyCh chan ApplyMsg) *Raft {
 	rf := &Raft{}
-	//rf.peers = peers
 	rf.persister = persister
 	rf.me = me
 	// Your initialization code here (2A, 2B, 2C).
