@@ -13,15 +13,15 @@ import "testing"
 import "fmt"
 import "time"
 
-//import "math/rand"
-//import "sync/atomic"
-//import "sync"
+import "math/rand"
+import "sync/atomic"
+import "sync"
 
 // The tester generously allows solutions to complete elections in one second
 // (much more than the paper's range of timeouts).
 const RaftElectionTimeout = 1000 * time.Millisecond
 
-/*func TestInitialElection2A(t *testing.T) {
+func TestInitialElection2A(t *testing.T) {
 	servers := 3
 	cfg := make_config(t, servers, false)
 	defer cfg.cleanup()
@@ -96,7 +96,7 @@ func TestReElection2A(t *testing.T) {
 	cfg.checkOneLeader()
 
 	cfg.end()
-}*/
+}
 
 func TestBasicAgree2B(t *testing.T) {
 	servers := 5
@@ -128,7 +128,6 @@ func TestBasicAgree2B(t *testing.T) {
 	cfg.end()
 }
 
-/*
 func TestFailAgree2B(t *testing.T) {
 	servers := 3
 	cfg := make_config(t, servers, false)
@@ -139,6 +138,7 @@ func TestFailAgree2B(t *testing.T) {
 	cfg.one(101, servers, false)
 
 	// follower network disconnection
+	fmt.Println("checkOneLeader")
 	leader := cfg.checkOneLeader()
 	cfg.disconnect((leader + 1) % servers)
 
@@ -357,6 +357,8 @@ func TestBackup2B(t *testing.T) {
 
 	cfg.begin("Test (2B): leader backs up quickly over incorrect follower logs")
 
+	fmt.Println("phase1")
+
 	cfg.one(rand.Int(), servers, true)
 
 	// put leader and one follower in a partition
@@ -380,6 +382,8 @@ func TestBackup2B(t *testing.T) {
 	cfg.connect((leader1 + 3) % servers)
 	cfg.connect((leader1 + 4) % servers)
 
+	fmt.Println("phase2")
+
 	// lots of successful commands to new group.
 	for i := 0; i < 50; i++ {
 		cfg.one(rand.Int(), 3, true)
@@ -392,6 +396,8 @@ func TestBackup2B(t *testing.T) {
 		other = (leader2 + 1) % servers
 	}
 	cfg.disconnect(other)
+
+	fmt.Println("phase3")
 
 	// lots more commands that won't commit
 	for i := 0; i < 50; i++ {
@@ -408,6 +414,8 @@ func TestBackup2B(t *testing.T) {
 	cfg.connect((leader1 + 1) % servers)
 	cfg.connect(other)
 
+	fmt.Println("phase4")
+
 	// lots of successful commands to new group.
 	for i := 0; i < 50; i++ {
 		cfg.one(rand.Int(), 3, true)
@@ -417,6 +425,9 @@ func TestBackup2B(t *testing.T) {
 	for i := 0; i < servers; i++ {
 		cfg.connect(i)
 	}
+
+	fmt.Println("phase5")
+
 	cfg.one(rand.Int(), servers, true)
 
 	cfg.end()
@@ -956,4 +967,3 @@ func TestReliableChurn2C(t *testing.T) {
 func TestUnreliableChurn2C(t *testing.T) {
 	internalChurn(t, true)
 }
-*/

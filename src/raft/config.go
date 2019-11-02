@@ -428,6 +428,10 @@ func (cfg *config) wait(index int, n int, startTerm int) interface{} {
 func (cfg *config) one(cmd int, expectedServers int, retry bool) int {
 	t0 := time.Now()
 	starts := 0
+
+	ii := 0
+	leader := 0
+
 	for time.Since(t0).Seconds() < 10 {
 		// try all the servers, maybe one is the leader.
 		index := -1
@@ -443,6 +447,9 @@ func (cfg *config) one(cmd int, expectedServers int, retry bool) int {
 				index1, _, ok := rf.Start(cmd)
 				if ok {
 					index = index1
+
+					ii = index
+					leader = starts
 					break
 				}
 			}
@@ -470,7 +477,14 @@ func (cfg *config) one(cmd int, expectedServers int, retry bool) int {
 			time.Sleep(50 * time.Millisecond)
 		}
 	}
-	cfg.t.Fatalf("one(%v) failed to reach agreement", cmd)
+
+	/*for _, v := range cfg.rafts {
+		v.mu.Lock()
+		fmt.Println(v.me, "commitIndex", v.commitIndex, "lastApplied", v.lastApplied, v.log)
+		v.mu.Unlock()
+	}*/
+
+	cfg.t.Fatalf("one(leader:%d,index:%d,%v) failed to reach agreement", leader, ii, cmd)
 	return -1
 }
 

@@ -3,7 +3,7 @@
 for((i=1; i<100;i++));
 	do
 	echo "start " $i	
-	go test -race -run 2A;
+	go test -race -run 2B;
 	if [ $? -eq 0 ]; then
 		echo $i "success"
 	else
