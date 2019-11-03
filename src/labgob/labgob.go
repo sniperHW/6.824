@@ -14,6 +14,7 @@ import "fmt"
 import "sync"
 import "unicode"
 import "unicode/utf8"
+import "runtime"
 
 var mu sync.Mutex
 var errorCount int // for TestCapital
@@ -126,6 +127,20 @@ func checkDefault(value interface{}) {
 	checkDefault1(reflect.ValueOf(value), 1, "")
 }
 
+func CallStack(maxStack int) {
+	var str string
+	i := 1
+	for {
+		pc, file, line, ok := runtime.Caller(i)
+		if !ok || i > maxStack {
+			break
+		}
+		str += fmt.Sprintf("    stack: %d %v [file: %s] [func: %s] [line: %d]\n", i-1, ok, file, runtime.FuncForPC(pc).Name(), line)
+		i++
+	}
+	fmt.Println(str)
+}
+
 func checkDefault1(value reflect.Value, depth int, name string) {
 	if depth > 3 {
 		return
@@ -168,6 +183,8 @@ func checkDefault1(value reflect.Value, depth int, name string) {
 				// state into variable that already have non-default values.
 				fmt.Printf("labgob warning: Decoding into a non-default variable/field %v may not work\n",
 					what)
+
+				CallStack(10)
 			}
 			errorCount += 1
 			mu.Unlock()
