@@ -443,24 +443,26 @@ func (rf *Raft) AppendEntrys(args *RequestAppendEntrysArgs, reply *RequestAppend
 	if nil == entry || entry.Term != args.PrevLogTerm {
 		//没有通过一致性检查
 		if nil == entry {
-			reply.Term = 0
-		} else {
-			reply.Term = entry.Term
+			entry = rf.log[len(rf.log)-1]
 		}
+
+		reply.Term = entry.Term
+
 		fmt.Println(rf.me, "reject3 from", args.LeaderId, "because of consistent check", entry, args.PrevLogIndex, args.PrevLogTerm)
 		reply.Success = false
 		return
 	}
 
-	if len(rf.log) > args.PrevLogIndex {
-		//将args.PrevLogIndex之后的日志删除
-		if len(rf.log) > args.PrevLogIndex+1 {
-			fmt.Println(rf.me, "drop entrys from", args.LeaderId, len(rf.log), args.PrevLogIndex+1, args.Entries, time.Now())
-			rf.log = rf.log[0 : args.PrevLogIndex+1]
-		}
-	}
-
 	if nil != args.Entries && len(args.Entries) > 0 {
+
+		if len(rf.log) > args.PrevLogIndex {
+			//将args.PrevLogIndex之后的日志删除
+			if len(rf.log) > args.PrevLogIndex+1 {
+				fmt.Println(rf.me, "drop entrys from", args.LeaderId, len(rf.log), args.PrevLogIndex+1, args.Entries, time.Now())
+				rf.log = rf.log[0 : args.PrevLogIndex+1]
+			}
+		}
+
 		//将entry添加到本地log
 		for _, v := range args.Entries {
 			rf.log = append(rf.log, v)
@@ -565,7 +567,7 @@ func (rf *Raft) onAppendEntrysReply(p *peer, ok bool, args *RequestAppendEntrysA
 					//需要优化
 					if reply.Term != 0 {
 						for _, v := range rf.log {
-							if v.Term == reply.Term { // && v.Index > p.matchIndex {
+							if v.Term == reply.Term && v.Index > p.matchIndex {
 								p.nextIndex = v.Index + 1
 								break
 							}
