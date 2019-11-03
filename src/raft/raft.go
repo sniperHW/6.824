@@ -439,17 +439,17 @@ func (rf *Raft) AppendEntrys(args *RequestAppendEntrysArgs, reply *RequestAppend
 		}
 	}
 
-	entry := rf.getEntryByIndex(args.PrevLogIndex)
+	preEntry := rf.getEntryByIndex(args.PrevLogIndex)
 
-	if nil == entry || entry.Term != args.PrevLogTerm {
+	if nil == preEntry || preEntry.Term != args.PrevLogTerm {
 		//没有通过一致性检查
-		if nil == entry {
-			entry = &rf.log[len(rf.log)-1]
+		if nil == preEntry {
+			preEntry = &rf.log[len(rf.log)-1]
 		}
 
-		reply.Term = entry.Term
+		reply.Term = preEntry.Term
 
-		fmt.Println("server:", rf.me, "reject3 from", args.LeaderId, "because of consistent check", entry, args.PrevLogIndex, args.PrevLogTerm)
+		fmt.Println("server:", rf.me, "reject3 from", args.LeaderId, "because of consistent check", preEntry, args.PrevLogIndex, args.PrevLogTerm)
 		reply.Success = false
 		return
 	}
@@ -459,11 +459,6 @@ func (rf *Raft) AppendEntrys(args *RequestAppendEntrysArgs, reply *RequestAppend
 	if nil != args.Entries && len(args.Entries) > 0 {
 
 		//将args.PrevLogIndex之后的日志删除
-		//if len(rf.log) > args.PrevLogIndex+1 {
-		//	fmt.Println("server:", rf.me, "drop entrys from", args.LeaderId, len(rf.log), args.PrevLogIndex+1, args.Entries, "drops", rf.log[args.PrevLogIndex+1:], time.Now())
-		//	rf.log = rf.log[0 : args.PrevLogIndex+1]
-		//}
-
 		if nil != lastEntry && lastEntry.Index > args.PrevLogIndex {
 			fmt.Println("server:", rf.me, "drop entrys from", args.LeaderId, len(rf.log), args.PrevLogIndex+1, args.Entries, "drops", rf.log[args.PrevLogIndex+1:], time.Now())
 			rf.log = rf.log[0 : args.PrevLogIndex+1]
@@ -474,27 +469,30 @@ func (rf *Raft) AppendEntrys(args *RequestAppendEntrysArgs, reply *RequestAppend
 			rf.log = append(rf.log, v)
 		}
 
+		lastEntry = rf.getLastEntry()
+		oldApply := rf.lastApplied
+		if lastEntry.Index >= args.LeaderCommit {
+			rf.commitIndex = args.LeaderCommit
+		} else {
+			rf.commitIndex = lastEntry.Index
+		}
+
+		rf.doApply()
+		fmt.Println("server:", rf.me, oldApply, rf.lastApplied, "term", rf.currentTerm, "follower commit", args.LeaderCommit, rf.log)
+
 		rf.persist()
 
 		fmt.Println("server:", rf.me, "replicate entrys from", args.LeaderId, rf.log, "Entries", args.Entries)
+	} else {
+		if nil != preEntry && args.LeaderCommit >= preEntry.Index {
+			oldApply := rf.lastApplied
+			rf.commitIndex = preEntry.Index
+			rf.doApply()
+			fmt.Println("server:", rf.me, oldApply, rf.lastApplied, "term", rf.currentTerm, "follower commit", args.LeaderCommit, rf.log)
+		}
 	}
 
 	rf.updateLeader(args.LeaderId)
-
-	/*if args.LeaderCommit >= args.PrevLogIndex && args.LeaderCommit < len(rf.log) {
-		oldApply := rf.lastApplied
-		rf.commitIndex = args.LeaderCommit
-		rf.doApply()
-		fmt.Println("server:", rf.me, oldApply, rf.lastApplied, "term", rf.currentTerm, "follower commit", args.LeaderCommit, rf.log)
-	}*/
-
-	if nil != lastEntry && lastEntry.Index <= args.LeaderCommit {
-		oldApply := rf.lastApplied
-		rf.commitIndex = lastEntry.Index
-		rf.doApply()
-		fmt.Println("server:", rf.me, oldApply, rf.lastApplied, "term", rf.currentTerm, "follower commit", args.LeaderCommit, rf.log)
-	}
-
 	reply.Success = true
 	reply.Term = rf.currentTerm
 }
