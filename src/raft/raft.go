@@ -26,9 +26,6 @@ import (
 	"time"
 )
 
-// import "bytes"
-// import "labgob"
-
 //
 // as each Raft peer becomes aware that successive log entries are
 // committed, the peer should send an ApplyMsg to the service (or
@@ -191,9 +188,6 @@ func (rf *Raft) persist() {
 	e.Encode(rf.log)
 
 	rf.persister.SaveRaftState(w.Bytes())
-
-	//fmt.Println(rf.me, "persister", rf.log)
-
 }
 
 //
@@ -223,8 +217,6 @@ func (rf *Raft) readPersist(data []byte) {
 	var currentTerm int
 	var votedFor int = -1
 	var log []logEntry
-	//var lastApplied int
-	//var commitIndex int
 
 	if err := d.Decode(&currentTerm); err != nil {
 		fmt.Printf("[%d] readPersist currentTerm failed of:%s", rf.me, err.Error())
@@ -298,7 +290,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 			//leader发现更大的term,becomeFollower
 			rf.becomeFollower(args.Term)
 		} else {
-			fmt.Println(rf.me, "un vote1 to", args.CandidateId)
+			//fmt.Println(rf.me, "un vote1 to", args.CandidateId)
 			reply.VoteGranted = false
 			reply.Term = rf.currentTerm
 			return
@@ -308,14 +300,14 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		if args.Term < rf.currentTerm {
 			//收到更小的term,拒绝同时把自身term返回
 			reply.Term = rf.currentTerm
-			fmt.Println(rf.me, "un vote1 to", args.CandidateId)
+			//fmt.Println(rf.me, "un vote1 to", args.CandidateId)
 			reply.VoteGranted = false
 			return
 		} else if args.Term > rf.currentTerm {
 			rf.becomeFollower(args.Term)
 		} else if rf.votedFor != nil && *rf.votedFor != args.CandidateId {
 			//已经投过票了
-			fmt.Println(rf.me, "un vote3 to", args.CandidateId)
+			//fmt.Println(rf.me, "un vote3 to", args.CandidateId)
 			reply.VoteGranted = false
 			reply.Term = rf.currentTerm
 			return
@@ -332,13 +324,13 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		if lastLogTerm == args.LastLogTerm {
 			if lastLogIndex > args.LastLogIndex {
 				reply.Term = rf.currentTerm
-				fmt.Println(rf.me, "un vote4 to", args.CandidateId)
+				//fmt.Println(rf.me, "un vote4 to", args.CandidateId)
 				reply.VoteGranted = false
 				return
 			}
 		} else if lastLogTerm > args.LastLogTerm {
 			reply.Term = rf.currentTerm
-			fmt.Println(rf.me, "un vote5 to", args.CandidateId)
+			//fmt.Println(rf.me, "un vote5 to", args.CandidateId)
 			reply.VoteGranted = false
 			return
 		}
@@ -455,7 +447,7 @@ func (rf *Raft) AppendEntrys(args *RequestAppendEntrysArgs, reply *RequestAppend
 		} else {
 			reply.Term = entry.Term
 		}
-		fmt.Println(rf.me, "reject3 from", args.LeaderId, "because of consistent check", entry, args.PrevLogIndex, args.PrevLogTerm)
+		//fmt.Println(rf.me, "reject3 from", args.LeaderId, "because of consistent check", entry, args.PrevLogIndex, args.PrevLogTerm)
 		reply.Success = false
 		return
 	}
@@ -476,13 +468,13 @@ func (rf *Raft) AppendEntrys(args *RequestAppendEntrysArgs, reply *RequestAppend
 
 		rf.persist()
 
-		//fmt.Println(rf.me, "replicate entrys from", args.LeaderId, rf.log, "Entries", args.Entries)
+		fmt.Println(rf.me, "replicate entrys from", args.LeaderId, rf.log, "Entries", args.Entries)
 	}
 
 	rf.updateLeader(args.LeaderId)
 
 	if args.LeaderCommit <= len(rf.log) {
-		//fmt.Println(rf.me, "term", rf.currentTerm, "follower commit", args.LeaderCommit, rf.lastApplied, rf.log)
+		fmt.Println(rf.me, "term", rf.currentTerm, "follower commit", args.LeaderCommit, rf.lastApplied, rf.log)
 		rf.commitIndex = args.LeaderCommit
 		rf.doApply()
 	}
@@ -548,9 +540,9 @@ func (rf *Raft) onAppendEntrysReply(p *peer, ok bool, args *RequestAppendEntrysA
 
 						if lastEntry.Term == rf.currentTerm {
 							rf.updateCommited(lastEntry.Index)
-							//fmt.Println(rf.me, "commit replicate entries success to", p.id, args.Entries)
+							fmt.Println(rf.me, "commit replicate entries success to", p.id, args.Entries)
 						} else {
-							//fmt.Println(rf.me, "replicate entries success to", p.id, args.Entries)
+							fmt.Println(rf.me, "replicate entries success to", p.id, args.Entries)
 						}
 					}
 

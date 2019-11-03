@@ -195,12 +195,6 @@ func (cfg *config) start1(i int) {
 
 			if err_msg != "" {
 
-				/*for _, v := range cfg.rafts {
-					v.mu.Lock()
-					fmt.Println(v.me, "commitIndex", v.commitIndex, "lastApplied", v.lastApplied, v.log)
-					v.mu.Unlock()
-				}*/
-
 				log.Fatalf("apply error: %v\n", err_msg)
 				cfg.applyErr[i] = err_msg
 
