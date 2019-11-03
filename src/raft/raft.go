@@ -133,6 +133,7 @@ func (rf *Raft) apply(entry *logEntry) {
 		Command:      entry.Command,
 		CommandIndex: entry.Index,
 	}
+	fmt.Println("server:", rf.me, "apply", *entry)
 	rf.applyCh <- applyMsg
 }
 
@@ -508,7 +509,7 @@ func (rf *Raft) doApply() {
 	}
 
 	if oldApply != rf.lastApplied {
-		fmt.Println("server:", rf.me, "apply from", oldApply, "to", rf.lastApplied-1)
+		fmt.Println("server:", rf.me, "apply from", oldApply, "to", rf.lastApplied)
 	}
 }
 
