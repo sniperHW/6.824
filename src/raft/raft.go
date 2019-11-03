@@ -454,10 +454,17 @@ func (rf *Raft) AppendEntrys(args *RequestAppendEntrysArgs, reply *RequestAppend
 		return
 	}
 
+	lastEntry := rf.getLastEntry()
+
 	if nil != args.Entries && len(args.Entries) > 0 {
 
 		//将args.PrevLogIndex之后的日志删除
-		if len(rf.log) > args.PrevLogIndex+1 {
+		//if len(rf.log) > args.PrevLogIndex+1 {
+		//	fmt.Println("server:", rf.me, "drop entrys from", args.LeaderId, len(rf.log), args.PrevLogIndex+1, args.Entries, "drops", rf.log[args.PrevLogIndex+1:], time.Now())
+		//	rf.log = rf.log[0 : args.PrevLogIndex+1]
+		//}
+
+		if nil != lastEntry && lastEntry.Index > args.PrevLogIndex {
 			fmt.Println("server:", rf.me, "drop entrys from", args.LeaderId, len(rf.log), args.PrevLogIndex+1, args.Entries, "drops", rf.log[args.PrevLogIndex+1:], time.Now())
 			rf.log = rf.log[0 : args.PrevLogIndex+1]
 		}
@@ -474,9 +481,16 @@ func (rf *Raft) AppendEntrys(args *RequestAppendEntrysArgs, reply *RequestAppend
 
 	rf.updateLeader(args.LeaderId)
 
-	if args.LeaderCommit < len(rf.log) {
+	/*if args.LeaderCommit >= args.PrevLogIndex && args.LeaderCommit < len(rf.log) {
 		oldApply := rf.lastApplied
 		rf.commitIndex = args.LeaderCommit
+		rf.doApply()
+		fmt.Println("server:", rf.me, oldApply, rf.lastApplied, "term", rf.currentTerm, "follower commit", args.LeaderCommit, rf.log)
+	}*/
+
+	if nil != lastEntry && lastEntry.Index <= args.LeaderCommit {
+		oldApply := rf.lastApplied
+		rf.commitIndex = lastEntry.Index
 		rf.doApply()
 		fmt.Println("server:", rf.me, oldApply, rf.lastApplied, "term", rf.currentTerm, "follower commit", args.LeaderCommit, rf.log)
 	}
