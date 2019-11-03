@@ -443,7 +443,7 @@ func (rf *Raft) AppendEntrys(args *RequestAppendEntrysArgs, reply *RequestAppend
 	if nil == entry || entry.Term != args.PrevLogTerm {
 		//没有通过一致性检查
 		if nil == entry {
-			entry = rf.log[len(rf.log)-1]
+			entry = &rf.log[len(rf.log)-1]
 		}
 
 		reply.Term = entry.Term
