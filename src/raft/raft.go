@@ -238,7 +238,7 @@ func (rf *Raft) readPersist(data []byte) {
 	}
 	rf.log = log
 
-	//fmt.Println(rf.me, "read persister", rf.log)
+	fmt.Println(rf.me, "read persister", rf.log)
 }
 
 //
@@ -447,15 +447,15 @@ func (rf *Raft) AppendEntrys(args *RequestAppendEntrysArgs, reply *RequestAppend
 		} else {
 			reply.Term = entry.Term
 		}
-		//fmt.Println(rf.me, "reject3 from", args.LeaderId, "because of consistent check", entry, args.PrevLogIndex, args.PrevLogTerm)
+		fmt.Println(rf.me, "reject3 from", args.LeaderId, "because of consistent check", entry, args.PrevLogIndex, args.PrevLogTerm)
 		reply.Success = false
 		return
 	}
 
 	if len(rf.log) > args.PrevLogIndex {
 		//将args.PrevLogIndex之后的日志删除
-		if len(rf.log) != args.PrevLogIndex+1 {
-			//fmt.Println(rf.me, "drop entrys from", args.LeaderId, len(rf.log), args.PrevLogIndex+1, args.Entries, time.Now())
+		if len(rf.log) > args.PrevLogIndex+1 {
+			fmt.Println(rf.me, "drop entrys from", args.LeaderId, len(rf.log), args.PrevLogIndex+1, args.Entries, time.Now())
 			rf.log = rf.log[0 : args.PrevLogIndex+1]
 		}
 	}
@@ -473,10 +473,11 @@ func (rf *Raft) AppendEntrys(args *RequestAppendEntrysArgs, reply *RequestAppend
 
 	rf.updateLeader(args.LeaderId)
 
-	if args.LeaderCommit <= len(rf.log) {
-		fmt.Println(rf.me, "term", rf.currentTerm, "follower commit", args.LeaderCommit, rf.lastApplied, rf.log)
+	if args.LeaderCommit < len(rf.log) {
+		oldApply := rf.lastApplied
 		rf.commitIndex = args.LeaderCommit
 		rf.doApply()
+		fmt.Println(rf.me, oldApply, rf.lastApplied, "term", rf.currentTerm, "follower commit", args.LeaderCommit, rf.log)
 	}
 
 	reply.Success = true
@@ -538,11 +539,14 @@ func (rf *Raft) onAppendEntrysReply(p *peer, ok bool, args *RequestAppendEntrysA
 						p.nextIndex = lastEntry.Index + 1
 						p.matchIndex = lastEntry.Index
 
+						oldCommitIndex := rf.commitIndex
+						oldApply := rf.lastApplied
+
 						if lastEntry.Term == rf.currentTerm {
 							rf.updateCommited(lastEntry.Index)
-							fmt.Println(rf.me, "commit replicate entries success to", p.id, args.Entries)
-						} else {
-							fmt.Println(rf.me, "replicate entries success to", p.id, args.Entries)
+							if oldCommitIndex != rf.commitIndex {
+								fmt.Println(rf.me, oldApply, rf.lastApplied, "commitIndex", rf.commitIndex, "leader commit ", p.id, args.Entries)
+							}
 						}
 					}
 
@@ -553,7 +557,7 @@ func (rf *Raft) onAppendEntrysReply(p *peer, ok bool, args *RequestAppendEntrysA
 					}
 				} else {
 
-					//fmt.Println(rf.me, "onAppendEntrysReply failed from", p.id, reply.Term, p.nextIndex)
+					fmt.Println(rf.me, "onAppendEntrysReply failed from", p.id, reply.Term, p.nextIndex)
 
 					//follower与leader不匹配，需要调整nextIndex重试
 					p.nextIndex = 1
