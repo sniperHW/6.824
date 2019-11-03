@@ -448,19 +448,17 @@ func (rf *Raft) AppendEntrys(args *RequestAppendEntrysArgs, reply *RequestAppend
 
 		reply.Term = entry.Term
 
-		fmt.Println(rf.me, "reject3 from", args.LeaderId, "because of consistent check", entry, args.PrevLogIndex, args.PrevLogTerm)
+		fmt.Println("server:", rf.me, "reject3 from", args.LeaderId, "because of consistent check", entry, args.PrevLogIndex, args.PrevLogTerm)
 		reply.Success = false
 		return
 	}
 
 	if nil != args.Entries && len(args.Entries) > 0 {
 
-		if len(rf.log) > args.PrevLogIndex {
-			//将args.PrevLogIndex之后的日志删除
-			if len(rf.log) > args.PrevLogIndex+1 {
-				fmt.Println(rf.me, "drop entrys from", args.LeaderId, len(rf.log), args.PrevLogIndex+1, args.Entries, time.Now())
-				rf.log = rf.log[0 : args.PrevLogIndex+1]
-			}
+		//将args.PrevLogIndex之后的日志删除
+		if len(rf.log) > args.PrevLogIndex+1 {
+			fmt.Println("server:", rf.me, "drop entrys from", args.LeaderId, len(rf.log), args.PrevLogIndex+1, args.Entries, "drops", rf.log[args.PrevLogIndex+1:], time.Now())
+			rf.log = rf.log[0 : args.PrevLogIndex+1]
 		}
 
 		//将entry添加到本地log
@@ -470,7 +468,7 @@ func (rf *Raft) AppendEntrys(args *RequestAppendEntrysArgs, reply *RequestAppend
 
 		rf.persist()
 
-		fmt.Println(rf.me, "replicate entrys from", args.LeaderId, rf.log, "Entries", args.Entries)
+		fmt.Println("server:", rf.me, "replicate entrys from", args.LeaderId, rf.log, "Entries", args.Entries)
 	}
 
 	rf.updateLeader(args.LeaderId)
@@ -479,7 +477,7 @@ func (rf *Raft) AppendEntrys(args *RequestAppendEntrysArgs, reply *RequestAppend
 		oldApply := rf.lastApplied
 		rf.commitIndex = args.LeaderCommit
 		rf.doApply()
-		fmt.Println(rf.me, oldApply, rf.lastApplied, "term", rf.currentTerm, "follower commit", args.LeaderCommit, rf.log)
+		fmt.Println("server:", rf.me, oldApply, rf.lastApplied, "term", rf.currentTerm, "follower commit", args.LeaderCommit, rf.log)
 	}
 
 	reply.Success = true
@@ -495,6 +493,9 @@ func (rf *Raft) sendAppendEntrys(server int, args *RequestAppendEntrysArgs, repl
 }
 
 func (rf *Raft) doApply() {
+
+	oldApply := rf.lastApplied
+
 	for rf.lastApplied < rf.commitIndex && rf.lastApplied+1 < len(rf.log) {
 		index := rf.lastApplied + 1
 		if index >= len(rf.log) {
@@ -504,6 +505,10 @@ func (rf *Raft) doApply() {
 		entry := &rf.log[index]
 		rf.apply(entry)
 		rf.lastApplied++
+	}
+
+	if oldApply != rf.lastApplied {
+		fmt.Println("server:", rf.me, "apply from", oldApply, "to", rf.lastApplied-1)
 	}
 }
 
@@ -547,7 +552,7 @@ func (rf *Raft) onAppendEntrysReply(p *peer, ok bool, args *RequestAppendEntrysA
 						if lastEntry.Term == rf.currentTerm {
 							rf.updateCommited(lastEntry.Index)
 							if oldCommitIndex != rf.commitIndex {
-								fmt.Println(rf.me, oldApply, rf.lastApplied, "commitIndex", rf.commitIndex, "leader commit ", p.id, args.Entries)
+								fmt.Println("server:", rf.me, oldApply, rf.lastApplied, "commitIndex", rf.commitIndex, "leader commit ", p.id, args.Entries)
 							}
 						}
 					}
@@ -559,7 +564,7 @@ func (rf *Raft) onAppendEntrysReply(p *peer, ok bool, args *RequestAppendEntrysA
 					}
 				} else {
 
-					fmt.Println(rf.me, "onAppendEntrysReply failed from", p.id, reply.Term, p.nextIndex)
+					fmt.Println("server:", rf.me, "onAppendEntrysReply failed from", p.id, reply.Term, p.nextIndex)
 
 					//follower与leader不匹配，需要调整nextIndex重试
 					p.nextIndex = 1
@@ -661,7 +666,7 @@ func (rf *Raft) Kill() {
 
 func (rf *Raft) becomeFollower(term int) {
 
-	fmt.Println(rf.me, "becomeFollower at term", term)
+	fmt.Println("server:", rf.me, "becomeFollower at term", term)
 
 	rf.resetElectionTimeout()
 	rf.updateRole(roleFollower)
@@ -679,7 +684,7 @@ func (rf *Raft) becomeCandidate() {
 	rf.leader = -1
 	rf.currentTerm++
 
-	fmt.Println(rf.me, "becomeCandidate at term", rf.currentTerm, time.Now())
+	fmt.Println("server:", rf.me, "becomeCandidate at term", rf.currentTerm, time.Now())
 
 	//给自己投票
 	rf.votedFor = &rf.me
@@ -707,7 +712,7 @@ func (rf *Raft) becomeCandidate() {
 
 func (rf *Raft) becomeLeader() {
 
-	fmt.Println(rf.me, "becomeLeader at term", rf.currentTerm)
+	fmt.Println("server:", rf.me, "becomeLeader at term", rf.currentTerm)
 
 	rf.clearElectionTimeout()
 	rf.updateRole(roleLeader)
