@@ -57,21 +57,17 @@ func TestReElection2A(t *testing.T) {
 
 	cfg.begin("Test (2A): election after network failure")
 
-	fmt.Println("phase1-------------")
-
 	leader1 := cfg.checkOneLeader()
 
 	// if the leader disconnects, a new one should be elected.
 	cfg.disconnect(leader1)
 
-	fmt.Println("phase2-------------")
 	cfg.checkOneLeader()
 
 	// if the old leader rejoins, that shouldn't
 	// disturb the new leader.
 	cfg.connect(leader1)
 	fmt.Println(leader1, "rejoins")
-	fmt.Println("phase3-------------")
 	leader2 := cfg.checkOneLeader()
 	//time.Sleep(2 * RaftElectionTimeout)
 
@@ -81,19 +77,18 @@ func TestReElection2A(t *testing.T) {
 	cfg.disconnect(leader2)
 	cfg.disconnect((leader2 + 1) % servers)
 
-	fmt.Println("begin sleep")
 	time.Sleep(2 * RaftElectionTimeout)
-	fmt.Println("phase4-------------")
+
 	cfg.checkNoLeader()
 
 	// if a quorum arises, it should elect a leader.
 	cfg.connect((leader2 + 1) % servers)
-	fmt.Println("phase5-------------")
+
 	cfg.checkOneLeader()
 
 	// re-join of last node shouldn't prevent leader from existing.
 	cfg.connect(leader2)
-	fmt.Println("phase6-------------")
+
 	cfg.checkOneLeader()
 
 	cfg.end()
@@ -118,8 +113,6 @@ func TestBasicAgree2B(t *testing.T) {
 
 		cfg.checkOneLeader()
 
-		fmt.Println("checkOneLeader")
-
 		xindex := cfg.one(index*100, servers, false)
 		if xindex != index {
 			t.Fatalf("got index %v but expected %v", xindex, index)
@@ -139,7 +132,7 @@ func TestFailAgree2B(t *testing.T) {
 	cfg.one(101, servers, false)
 
 	// follower network disconnection
-	fmt.Println("checkOneLeader")
+
 	leader := cfg.checkOneLeader()
 	cfg.disconnect((leader + 1) % servers)
 
@@ -383,8 +376,6 @@ func TestBackup2B(t *testing.T) {
 	cfg.connect((leader1 + 3) % servers)
 	cfg.connect((leader1 + 4) % servers)
 
-	fmt.Println("phase2")
-
 	// lots of successful commands to new group.
 	for i := 0; i < 50; i++ {
 		cfg.one(rand.Int(), 3, true)
@@ -397,8 +388,6 @@ func TestBackup2B(t *testing.T) {
 		other = (leader2 + 1) % servers
 	}
 	cfg.disconnect(other)
-
-	fmt.Println("phase3")
 
 	// lots more commands that won't commit
 	for i := 0; i < 50; i++ {
@@ -415,8 +404,6 @@ func TestBackup2B(t *testing.T) {
 	cfg.connect((leader1 + 1) % servers)
 	cfg.connect(other)
 
-	fmt.Println("phase4")
-
 	// lots of successful commands to new group.
 	for i := 0; i < 50; i++ {
 		cfg.one(rand.Int(), 3, true)
@@ -426,8 +413,6 @@ func TestBackup2B(t *testing.T) {
 	for i := 0; i < servers; i++ {
 		cfg.connect(i)
 	}
-
-	fmt.Println("phase5")
 
 	cfg.one(rand.Int(), servers, true)
 

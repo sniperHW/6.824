@@ -20,6 +20,7 @@ package raft
 import (
 	"bytes"
 	"fmt"
+	"golog"
 	"labgob"
 	"labrpc"
 	"sync"
@@ -41,6 +42,13 @@ type ApplyMsg struct {
 	CommandValid bool
 	Command      interface{}
 	CommandIndex int
+}
+
+var logger golog.LoggerI
+
+func init() {
+	outLogger := golog.NewOutputLogger("log", "raft", 1024*1024*1000)
+	logger = golog.New("raft", outLogger)
 }
 
 //
@@ -192,7 +200,7 @@ func (rf *Raft) persist() {
 //
 func (rf *Raft) readPersist(data []byte) {
 	if data == nil || len(data) < 1 { // bootstrap without any state?
-		fmt.Println(rf.me, "readPersist with no state")
+		logger.Debugln(rf.me, "readPersist with no state")
 		return
 	}
 	// Your code here (2C).
@@ -216,15 +224,15 @@ func (rf *Raft) readPersist(data []byte) {
 	var log []logEntry
 
 	if err := d.Decode(&currentTerm); err != nil {
-		fmt.Printf("[%d] readPersist currentTerm failed of:%s", rf.me, err.Error())
+		logger.Fatalf("[%d] readPersist currentTerm failed of:%s", rf.me, err.Error())
 		return
 	}
 	if err := d.Decode(&votedFor); err != nil {
-		fmt.Printf("[%d] readPersist votedFor failed of:%s", rf.me, err.Error())
+		logger.Fatalf("[%d] readPersist votedFor failed of:%s", rf.me, err.Error())
 		return
 	}
 	if err := d.Decode(&log); err != nil {
-		fmt.Printf("[%d] readPersist log failed of:%s", rf.me, err.Error())
+		logger.Fatalf("[%d] readPersist log failed of:%s", rf.me, err.Error())
 		return
 	}
 
@@ -283,7 +291,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 			//leader发现更大的term,becomeFollower
 			rf.becomeFollower(args.Term)
 		} else {
-			//fmt.Println(rf.me, "un vote1 to", args.CandidateId)
+			logger.Debugln("server:", rf.me, "un vote to ", args.CandidateId, "because of same term", rf.currentTerm)
 			reply.VoteGranted = false
 			reply.Term = rf.currentTerm
 			return
@@ -293,14 +301,14 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		if args.Term < rf.currentTerm {
 			//收到更小的term,拒绝同时把自身term返回
 			reply.Term = rf.currentTerm
-			//fmt.Println(rf.me, "un vote1 to", args.CandidateId)
+			logger.Debugln("server:", rf.me, "un vote to ", args.CandidateId, "because of less term", rf.currentTerm)
 			reply.VoteGranted = false
 			return
 		} else if args.Term > rf.currentTerm {
 			rf.becomeFollower(args.Term)
-		} else if rf.votedFor != args.CandidateId {
+		} else if rf.votedFor != -1 && rf.votedFor != args.CandidateId {
 			//已经投过票了
-			//fmt.Println(rf.me, "un vote3 to", args.CandidateId)
+			logger.Debugln("server:", rf.me, "un vote to ", args.CandidateId, "because already vote to", rf.votedFor)
 			reply.VoteGranted = false
 			reply.Term = rf.currentTerm
 			return
@@ -317,13 +325,13 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		if lastLogTerm == args.LastLogTerm {
 			if lastLogIndex > args.LastLogIndex {
 				reply.Term = rf.currentTerm
-				//fmt.Println(rf.me, "un vote4 to", args.CandidateId)
+				logger.Debugln("server:", rf.me, "un vote to ", args.CandidateId, "because of old log")
 				reply.VoteGranted = false
 				return
 			}
 		} else if lastLogTerm > args.LastLogTerm {
 			reply.Term = rf.currentTerm
-			//fmt.Println(rf.me, "un vote5 to", args.CandidateId)
+			logger.Debugln("server:", rf.me, "un vote to ", args.CandidateId, "because of old log")
 			reply.VoteGranted = false
 			return
 		}
@@ -332,6 +340,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		rf.votedFor = args.CandidateId
 		reply.Term = rf.currentTerm
 		reply.VoteGranted = true
+		logger.Debugln("server:", rf.me, "vote to ", args.CandidateId, "at term", rf.currentTerm)
 	}
 }
 
@@ -365,11 +374,9 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 // the struct itself.
 //
 func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *RequestVoteReply) {
-	//return rf.peers[server].call("Raft.RequestVote", args, reply)
 	p := rf.peers[server]
 	go func() {
 		ok := p.call("Raft.RequestVote", args, reply)
-		//fmt.Println("send vote")
 		rf.onRequestVoteReply(p, ok, args, reply)
 	}()
 }
@@ -380,7 +387,6 @@ func (rf *Raft) onRequestVoteReply(p *peer, ok bool, args *RequestVoteArgs, repl
 	if ok {
 		if reply.VoteGranted {
 			if rf.role == roleCandidate {
-				//fmt.Println(rf.me, "got vote from", p.id, "at term", rf.currentTerm)
 				rf.voteFrom[p.id] = true
 				if len(rf.voteFrom) > len(rf.peers)/2 {
 					//获得多数集的支持
@@ -420,7 +426,6 @@ func (rf *Raft) AppendEntrys(args *RequestAppendEntrysArgs, reply *RequestAppend
 		rf.becomeFollower(args.Term)
 	} else {
 		if rf.role == roleLeader {
-			//fmt.Println(rf.me, "reject 2")
 			reply.Success = false
 			reply.Term = rf.currentTerm
 			return
@@ -441,7 +446,9 @@ func (rf *Raft) AppendEntrys(args *RequestAppendEntrysArgs, reply *RequestAppend
 
 		reply.Term = preEntry.Term
 
-		//fmt.Println("server:", rf.me, "reject3 from", args.LeaderId, "because of consistent check", preEntry, args.PrevLogIndex, args.PrevLogTerm)
+		logger.Debugln("server:", rf.me, "reject AppendEntrys from", args.LeaderId, "because of consistent check failed",
+			"preEntry", preEntry, "PrevLogIndex", args.PrevLogIndex, "PrevLogTerm", args.PrevLogTerm)
+
 		reply.Success = false
 		return
 	}
@@ -451,8 +458,12 @@ func (rf *Raft) AppendEntrys(args *RequestAppendEntrysArgs, reply *RequestAppend
 	if nil != args.Entries && len(args.Entries) > 0 {
 
 		//将args.PrevLogIndex之后的日志删除
+		//必须在接收到Entries时才能drop Entries
+		//考虑下面情况，leader在第一次发送AppendEntrys时,因无法判断follower哪些entry存在冲突，因此不会携带实际的Entries
+		//如果follower收到这个消息时就将自己冲突的Entries drop掉，然后leader挂了，不再发送后续实际携带Entries的消息
 		if nil != lastEntry && lastEntry.Index > args.PrevLogIndex {
-			//fmt.Println("server:", rf.me, "drop entrys from", args.LeaderId, len(rf.log), args.PrevLogIndex+1, args.Entries, "drops", rf.log[args.PrevLogIndex+1:], time.Now())
+			logger.Debugln("server:", rf.me, "drop entrys from", args.LeaderId, "old len", len(rf.log),
+				"new len", args.PrevLogIndex+1, "comming Entries", args.Entries, "drop Entries", rf.log[args.PrevLogIndex+1:])
 			rf.log = rf.log[0 : args.PrevLogIndex+1]
 		}
 
@@ -462,25 +473,23 @@ func (rf *Raft) AppendEntrys(args *RequestAppendEntrysArgs, reply *RequestAppend
 		}
 
 		lastEntry = rf.getLastEntry()
-		//oldApply := rf.lastApplied
+
 		if lastEntry.Index >= args.LeaderCommit {
 			rf.commitIndex = args.LeaderCommit
 		} else {
 			rf.commitIndex = lastEntry.Index
 		}
 
+		logger.Debugln("server:", rf.me, "replicate entrys from", args.LeaderId, "logs", rf.log, "comming Entries", args.Entries)
+
 		rf.doApply()
-		//fmt.Println("server:", rf.me, oldApply, rf.lastApplied, "term", rf.currentTerm, "follower commit", args.LeaderCommit, rf.log)
 
 		rf.persist()
 
-		//fmt.Println("server:", rf.me, "replicate entrys from", args.LeaderId, rf.log, "Entries", args.Entries)
 	} else {
 		if nil != preEntry && args.LeaderCommit >= preEntry.Index {
-			//oldApply := rf.lastApplied
 			rf.commitIndex = preEntry.Index
 			rf.doApply()
-			//fmt.Println("server:", rf.me, oldApply, rf.lastApplied, "term", rf.currentTerm, "follower commit", args.LeaderCommit, rf.log)
 		}
 	}
 
@@ -499,7 +508,7 @@ func (rf *Raft) sendAppendEntrys(server int, args *RequestAppendEntrysArgs, repl
 
 func (rf *Raft) doApply() {
 
-	//oldApply := rf.lastApplied
+	oldApply := rf.lastApplied
 
 	for rf.lastApplied < rf.commitIndex && rf.lastApplied+1 < len(rf.log) {
 		index := rf.lastApplied + 1
@@ -512,9 +521,9 @@ func (rf *Raft) doApply() {
 		rf.lastApplied++
 	}
 
-	/*if oldApply != rf.lastApplied {
-		fmt.Println("server:", rf.me, "apply from", oldApply, "to", rf.lastApplied)
-	}*/
+	if oldApply != rf.lastApplied {
+		logger.Debugln("server:", rf.me, "apply entrys[", oldApply, ",", rf.lastApplied, "]")
+	}
 }
 
 func (rf *Raft) updateCommited(index int) {
@@ -552,12 +561,11 @@ func (rf *Raft) onAppendEntrysReply(p *peer, ok bool, args *RequestAppendEntrysA
 						p.matchIndex = lastEntry.Index
 
 						if lastEntry.Term == rf.currentTerm {
-							//oldCommitIndex := rf.commitIndex
-							//oldApply := rf.lastApplied
+							oldCommitIndex := rf.commitIndex
 							rf.updateCommited(lastEntry.Index)
-							//if oldCommitIndex != rf.commitIndex {
-							//	fmt.Println("server:", rf.me, oldApply, rf.lastApplied, "commitIndex", rf.commitIndex, "leader commit ", p.id, args.Entries)
-							//}
+							if oldCommitIndex != rf.commitIndex {
+								logger.Debugln("server:", rf.me, "leader commit", rf.commitIndex)
+							}
 						}
 					}
 
@@ -568,7 +576,7 @@ func (rf *Raft) onAppendEntrysReply(p *peer, ok bool, args *RequestAppendEntrysA
 					}
 				} else {
 
-					//fmt.Println("server:", rf.me, "onAppendEntrysReply failed from", p.id, reply.Term, p.nextIndex)
+					logger.Debugln("server:", rf.me, "onAppendEntrysReply failed from", p.id, "reply.Term", reply.Term, "nextIndex", p.nextIndex)
 
 					//follower与leader不匹配，需要调整nextIndex重试
 					p.nextIndex = 1
@@ -644,7 +652,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 		Command: command,
 	}
 
-	//fmt.Println(rf.me, "AppendEntrys", entry)
+	logger.Debugln("server:", rf.me, "AppendEntrys", entry)
 
 	rf.log = append(rf.log, entry)
 
@@ -670,7 +678,7 @@ func (rf *Raft) Kill() {
 
 func (rf *Raft) becomeFollower(term int) {
 
-	fmt.Println("server:", rf.me, "becomeFollower at term", term)
+	logger.Infoln("server:", rf.me, "becomeFollower at term", term)
 
 	rf.resetElectionTimeout()
 	rf.updateRole(roleFollower)
@@ -688,7 +696,7 @@ func (rf *Raft) becomeCandidate() {
 	rf.leader = -1
 	rf.currentTerm++
 
-	fmt.Println("server:", rf.me, "becomeCandidate at term", rf.currentTerm, time.Now())
+	logger.Infoln("server:", rf.me, "becomeCandidate at term", rf.currentTerm)
 
 	//给自己投票
 	rf.votedFor = rf.me
@@ -716,7 +724,7 @@ func (rf *Raft) becomeCandidate() {
 
 func (rf *Raft) becomeLeader() {
 
-	fmt.Println("server:", rf.me, "becomeLeader at term", rf.currentTerm)
+	logger.Infoln("server:", rf.me, "becomeLeader at term", rf.currentTerm)
 
 	rf.clearElectionTimeout()
 	rf.updateRole(roleLeader)
@@ -760,7 +768,6 @@ func (rf *Raft) clearElectionTimeout() {
 
 func (rf *Raft) prepareAppendEntriesRequest(p *peer) *RequestAppendEntrysArgs {
 	if p.nextIndex >= len(rf.log) {
-		//fmt.Println("send heartbeat only", p.id, len(rf.log), p.matchIndex, p.nextIndex)
 		//没有entry需要复制，发送心跳
 
 		request := &RequestAppendEntrysArgs{
@@ -778,8 +785,6 @@ func (rf *Raft) prepareAppendEntriesRequest(p *peer) *RequestAppendEntrysArgs {
 		return request
 
 	} else {
-
-		//fmt.Println(rf.me, p.matchIndex, p.nextIndex)
 
 		preEntry := rf.log[p.nextIndex-1]
 
@@ -802,7 +807,6 @@ func (rf *Raft) prepareAppendEntriesRequest(p *peer) *RequestAppendEntrysArgs {
 			for i := p.nextIndex; i < len(rf.log); i++ {
 				request.Entries = append(request.Entries, rf.log[i])
 			}
-			//fmt.Println(rf.me, "prepareAppendEntriesRequest to", p.id, request.Entries, p.nextIndex, len(rf.log))
 		}
 		return request
 	}
@@ -837,7 +841,7 @@ func (rf *Raft) tick() {
 
 func (rf *Raft) mainRoutine() {
 
-	//fmt.Println(rf.me, "mainRoutine start")
+	logger.Debugln("server:", rf.me, "mainRoutine start")
 
 	func() {
 		rf.mu.Lock()
@@ -869,7 +873,7 @@ func (rf *Raft) mainRoutine() {
 	}
 
 EndMainRountine:
-	//fmt.Println(rf.me, "mainRoutine stop")
+	logger.Debugln("server:", rf.me, "mainRoutine stop")
 	rf.doneCh <- struct{}{}
 }
 
