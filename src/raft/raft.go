@@ -723,6 +723,7 @@ func (rf *Raft) becomeCandidate() {
 
 	//给自己投票
 	rf.votedFor = rf.me
+	rf.voteFrom = make(map[int]bool)
 	rf.voteFrom[rf.me] = true
 	rf.persist()
 
