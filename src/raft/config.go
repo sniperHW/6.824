@@ -487,7 +487,7 @@ func (cfg *config) one(cmd int, expectedServers int, retry bool) int {
 	}*/
 
 	if leader == -1 {
-		cfg.t.Fatalf("one(%v) failed to reach agreement because of on leader")
+		cfg.t.Fatalf("one(%v) failed to reach agreement because of on leader", cmd)
 	} else {
 		cfg.t.Fatalf("one(leader:%d,index:%d,%v) failed to reach agreement", leader, ii, cmd)
 	}

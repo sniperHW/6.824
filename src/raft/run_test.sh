@@ -3,7 +3,7 @@
 for((i=1; i<1000;i++));
 	do
 	echo "start " $i	
-	go test -race -run 2C > out;
+	go test -race -run 2C > out.txt;
 	#go test -v -race > out.txt;
 	if [ $? -eq 0 ]; then
 		echo $i "success"
