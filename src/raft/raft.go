@@ -278,6 +278,13 @@ type RequestAppendEntrysReply struct {
 	Success bool
 }
 
+/*
+Make sure you reset your election timer exactly when Figure 2 says you should. Specifically,
+you should only restart your election timer if a) you get an AppendEntries RPC from the current leader
+(i.e., if the term in the AppendEntries arguments is outdated, you should not reset your timer);
+b) you are starting an election; or c) you grant a vote to another peer.
+*/
+
 //
 // example RequestVote RPC handler.
 //
@@ -337,6 +344,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		}
 
 		//可以支持
+		rf.resetElectionTimeout()
 		rf.votedFor = args.CandidateId
 		reply.Term = rf.currentTerm
 		reply.VoteGranted = true
@@ -453,8 +461,6 @@ func (rf *Raft) AppendEntrys(args *RequestAppendEntrysArgs, reply *RequestAppend
 		return
 	}
 
-	lastEntry := rf.getLastEntry()
-
 	/*
 	   If an existing entry conflicts with a new one (same index but different terms), delete the existing entry and all that follow it.
 
@@ -464,14 +470,20 @@ func (rf *Raft) AppendEntrys(args *RequestAppendEntrysArgs, reply *RequestAppend
 	   the leader that we have in our log.
 	*/
 
+	//if leaderCommit > commitIndex, set commitIndex =min(leaderCommit, index of last new entry)
+
 	if nil != args.Entries && len(args.Entries) > 0 {
+
+		identical := true
 
 		for _, v := range args.Entries {
 			if v.Index+1 > len(rf.log) {
 				rf.log = append(rf.log, v)
+				identical = false
 			} else {
 				myEntry := &rf.log[v.Index]
 				if myEntry.Term != v.Term {
+					identical = false
 					//替换entry
 					rf.log[v.Index] = v
 					//冲突，删除其后的所有entry
@@ -482,7 +494,12 @@ func (rf *Raft) AppendEntrys(args *RequestAppendEntrysArgs, reply *RequestAppend
 			}
 		}
 
-		lastEntry = rf.getLastEntry()
+		//identical == true表示本地log不需要做调整，因此无需调用持久化
+		if !identical {
+			rf.persist()
+		}
+
+		lastEntry := rf.getLastEntry()
 
 		if lastEntry.Index >= args.LeaderCommit {
 			rf.commitIndex = args.LeaderCommit
@@ -493,8 +510,6 @@ func (rf *Raft) AppendEntrys(args *RequestAppendEntrysArgs, reply *RequestAppend
 		logger.Debugln("server:", rf.me, "replicate entrys from", args.LeaderId, "logs", rf.log, "comming Entries", args.Entries)
 
 		rf.doApply()
-
-		rf.persist()
 
 	} else if args.LeaderCommit > rf.commitIndex {
 		//如果不满足条件，说明接收到重复的消息
@@ -830,13 +845,19 @@ func (rf *Raft) tick() {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 	if !rf.electionTimeout.IsZero() && now.After(rf.electionTimeout) {
-		if rf.role == roleCandidate {
-			rf.becomeFollower(rf.currentTerm)
-			return
-		} else if rf.role == roleFollower {
+
+		/*
+		 *  Follow Figure 2’s directions as to when you should start an election.
+		 *  In particular, note that if you are a candidate (i.e., you are currently running an election),
+		 *  but the election timer fires, you should start another election.
+		 *  This is important to avoid the system stalling due to delayed or dropped RPCs.
+		 */
+		if rf.role == roleLeader {
+			panic("leader should not run electionTimeout")
+		} else {
 			rf.becomeCandidate()
-			return
 		}
+		return
 	}
 
 	if rf.role == roleLeader {
