@@ -455,21 +455,31 @@ func (rf *Raft) AppendEntrys(args *RequestAppendEntrysArgs, reply *RequestAppend
 
 	lastEntry := rf.getLastEntry()
 
+	/*
+	   If an existing entry conflicts with a new one (same index but different terms), delete the existing entry and all that follow it.
+
+	   The if here is crucial. If the follower has all the entries the leader sent, the follower MUST NOT truncate its log.
+	   Any elements following the entries sent by the leader MUST be kept. This is because we could be receiving an outdated
+	   AppendEntries RPC from the leader, and truncating the log would mean “taking back” entries that we may have already told
+	   the leader that we have in our log.
+	*/
+
 	if nil != args.Entries && len(args.Entries) > 0 {
 
-		//将args.PrevLogIndex之后的日志删除
-		//必须在接收到Entries时才能drop Entries
-		//考虑下面情况，leader在第一次发送AppendEntrys时,因无法判断follower哪些entry存在冲突，因此不会携带实际的Entries
-		//如果follower收到这个消息时就将自己冲突的Entries drop掉，然后leader挂了，不再发送后续实际携带Entries的消息
-		if nil != lastEntry && lastEntry.Index > args.PrevLogIndex {
-			logger.Debugln("server:", rf.me, "drop entrys from", args.LeaderId, "old len", len(rf.log),
-				"new len", args.PrevLogIndex+1, "comming Entries", args.Entries, "drop Entries", rf.log[args.PrevLogIndex+1:])
-			rf.log = rf.log[0 : args.PrevLogIndex+1]
-		}
-
-		//将entry添加到本地log
 		for _, v := range args.Entries {
-			rf.log = append(rf.log, v)
+			if v.Index+1 > len(rf.log) {
+				rf.log = append(rf.log, v)
+			} else {
+				myEntry := &rf.log[v.Index]
+				if myEntry.Term != v.Term {
+					//替换entry
+					rf.log[v.Index] = v
+					//冲突，删除其后的所有entry
+					rf.log = rf.log[:v.Index+1]
+				} else {
+					//否则不需要做任何处理
+				}
+			}
 		}
 
 		lastEntry = rf.getLastEntry()
@@ -486,7 +496,8 @@ func (rf *Raft) AppendEntrys(args *RequestAppendEntrysArgs, reply *RequestAppend
 
 		rf.persist()
 
-	} else {
+	} else if args.LeaderCommit > rf.commitIndex {
+		//如果不满足条件，说明接收到重复的消息
 		if nil != preEntry && args.LeaderCommit >= preEntry.Index {
 			rf.commitIndex = preEntry.Index
 			rf.doApply()
