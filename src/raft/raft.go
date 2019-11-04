@@ -600,7 +600,7 @@ func (rf *Raft) onAppendEntrysReply(p *peer, ok bool, args *RequestAppendEntrysA
 					logger.Debugln("server:", rf.me, "onAppendEntrysReply failed from", p.id, "reply.Term", reply.Term, "nextIndex", p.nextIndex)
 
 					//follower与leader不匹配，需要调整nextIndex重试
-					p.nextIndex = args.PrevLogIndex
+					p.nextIndex = 1 //args.PrevLogIndex
 
 					//需要优化
 					if reply.Term != 0 {
