@@ -67,13 +67,11 @@ func TestReElection2A(t *testing.T) {
 	// if the old leader rejoins, that shouldn't
 	// disturb the new leader.
 	cfg.connect(leader1)
-	fmt.Println(leader1, "rejoins")
 	leader2 := cfg.checkOneLeader()
 	//time.Sleep(2 * RaftElectionTimeout)
 
 	// if there's no quorum, no leader should
 	// be elected.
-	fmt.Println(leader2, "disconnect")
 	cfg.disconnect(leader2)
 	cfg.disconnect((leader2 + 1) % servers)
 
@@ -103,8 +101,6 @@ func TestBasicAgree2B(t *testing.T) {
 
 	iters := 3
 	for index := 1; index < iters+1; index++ {
-
-		fmt.Println(index)
 
 		nd, _ := cfg.nCommitted(index)
 		if nd > 0 {
@@ -350,8 +346,6 @@ func TestBackup2B(t *testing.T) {
 	defer cfg.cleanup()
 
 	cfg.begin("Test (2B): leader backs up quickly over incorrect follower logs")
-
-	fmt.Println("phase1")
 
 	cfg.one(rand.Int(), servers, true)
 

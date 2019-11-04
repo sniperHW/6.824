@@ -605,13 +605,15 @@ func (rf *Raft) onAppendEntrysReply(p *peer, ok bool, args *RequestAppendEntrysA
 					logger.Debugln("server:", rf.me, "onAppendEntrysReply failed from", p.id, "reply.Term", reply.Term, "nextIndex", p.nextIndex)
 
 					//follower与leader不匹配，需要调整nextIndex重试
-					p.nextIndex = 1
+					p.nextIndex = args.PrevLogIndex
 
 					//需要优化
 					if reply.Term != 0 {
 						for _, v := range rf.log {
-							if v.Term == reply.Term && v.Index > p.matchIndex {
+							if v.Term == reply.Term {
 								p.nextIndex = v.Index + 1
+								break
+							} else if v.Term > reply.Term {
 								break
 							}
 						}
