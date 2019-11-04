@@ -393,19 +393,14 @@ func (rf *Raft) onRequestVoteReply(p *peer, ok bool, args *RequestVoteArgs, repl
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 	if ok {
-		if reply.VoteGranted {
+		if reply.Term > rf.currentTerm {
+			rf.becomeFollower(reply.Term)
+		} else if reply.VoteGranted {
 			if rf.role == roleCandidate {
 				rf.voteFrom[p.id] = true
 				if len(rf.voteFrom) > len(rf.peers)/2 {
 					//获得多数集的支持
 					rf.becomeLeader()
-				}
-			}
-		} else {
-			if reply.Term >= rf.currentTerm {
-				rf.currentTerm = reply.Term
-				if rf.role == roleLeader {
-					rf.becomeFollower(reply.Term)
 				}
 			}
 		}
