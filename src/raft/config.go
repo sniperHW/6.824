@@ -431,8 +431,8 @@ func (cfg *config) one(cmd int, expectedServers int, retry bool) int {
 	t0 := time.Now()
 	starts := 0
 
-	ii := 0
-	leader := 0
+	ii := -1
+	leader := -1
 
 	for time.Since(t0).Seconds() < 10 {
 		// try all the servers, maybe one is the leader.
@@ -486,7 +486,11 @@ func (cfg *config) one(cmd int, expectedServers int, retry bool) int {
 		v.mu.Unlock()
 	}*/
 
-	cfg.t.Fatalf("one(leader:%d,index:%d,%v) failed to reach agreement", leader, ii, cmd)
+	if leader == -1 {
+		cfg.t.Fatalf("one(%v) failed to reach agreement because of on leader")
+	} else {
+		cfg.t.Fatalf("one(leader:%d,index:%d,%v) failed to reach agreement", leader, ii, cmd)
+	}
 	return -1
 }
 
