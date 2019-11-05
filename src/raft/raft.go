@@ -420,7 +420,7 @@ func (rf *Raft) AppendEntrys(args *RequestAppendEntrysArgs, reply *RequestAppend
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 
-	/*if args.LeaderId == rf.leader && args.PrevLogIndex <= rf.commitIndex {
+	/*if args.LeaderId == rf.leader && args.PrevLogIndex < rf.commitIndex {
 		//相同leader,entry已经commit,判定为已经处理过的包的复现
 		return
 	}*/
