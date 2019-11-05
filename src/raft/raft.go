@@ -395,7 +395,7 @@ func (rf *Raft) onRequestVoteReply(p *peer, ok bool, args *RequestVoteArgs, repl
 	if ok {
 		if reply.Term > rf.currentTerm {
 			rf.becomeFollower(reply.Term)
-		} else if reply.VoteGranted {
+		} else if args.Term == rf.currentTerm && reply.VoteGranted {
 			if rf.role == roleCandidate {
 				rf.voteFrom[p.id] = true
 				if len(rf.voteFrom) > len(rf.peers)/2 {
@@ -419,6 +419,11 @@ func (rf *Raft) AppendEntrys(args *RequestAppendEntrysArgs, reply *RequestAppend
 
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
+
+	if args.LeaderId == rf.leader && args.PrevLogIndex <= rf.commitIndex {
+		//相同leader,entry已经commit,判定为已经处理过的包的复现
+		return
+	}
 
 	if args.Term < rf.currentTerm {
 		reply.Term = rf.currentTerm
@@ -571,6 +576,11 @@ func (rf *Raft) onAppendEntrysReply(p *peer, ok bool, args *RequestAppendEntrysA
 			//found large term,become follower
 			rf.becomeFollower(reply.Term)
 		} else {
+
+			if rf.currentTerm != args.Term {
+				return
+			}
+
 			if rf.role == roleLeader {
 				if reply.Success {
 					p.match = true
