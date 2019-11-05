@@ -288,32 +288,30 @@ b) you are starting an election; or c) you grant a vote to another peer.
 //
 // example RequestVote RPC handler.
 //
+
 func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	// Your code here (2A, 2B).
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 
-	if rf.role == roleLeader {
-		if args.Term > rf.currentTerm {
-			//leader发现更大的term,becomeFollower
-			rf.becomeFollower(args.Term)
-		} else {
-			logger.Debugln("server:", rf.me, "un vote to ", args.CandidateId, "because of same term", rf.currentTerm)
-			reply.VoteGranted = false
-			reply.Term = rf.currentTerm
-			return
-		}
+	if args.Term < rf.currentTerm {
+		//收到更小的term,拒绝同时把自身term返回
+		reply.Term = rf.currentTerm
+		logger.Debugln("server:", rf.me, "un vote to ", args.CandidateId, "because of less term", rf.currentTerm)
+		reply.VoteGranted = false
+		return
 	} else {
 
-		if args.Term < rf.currentTerm {
-			//收到更小的term,拒绝同时把自身term返回
-			reply.Term = rf.currentTerm
-			logger.Debugln("server:", rf.me, "un vote to ", args.CandidateId, "because of less term", rf.currentTerm)
-			reply.VoteGranted = false
-			return
-		} else if args.Term > rf.currentTerm {
+		if args.Term > rf.currentTerm {
+			oldLeader := rf.role == roleLeader
 			rf.becomeFollower(args.Term)
-		} else if rf.votedFor != -1 && rf.votedFor != args.CandidateId {
+			if oldLeader {
+				//之前是leader,无论如何都要重置选举定时器
+				rf.resetElectionTimeout()
+			}
+		}
+
+		if rf.votedFor != -1 && rf.votedFor != args.CandidateId {
 			//已经投过票了
 			logger.Debugln("server:", rf.me, "un vote to ", args.CandidateId, "because already vote to", rf.votedFor)
 			reply.VoteGranted = false
@@ -343,7 +341,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 			return
 		}
 
-		//可以支持
+		//投支持票，需要重置选举定时器
 		rf.resetElectionTimeout()
 		rf.votedFor = args.CandidateId
 		reply.Term = rf.currentTerm
@@ -395,6 +393,7 @@ func (rf *Raft) onRequestVoteReply(p *peer, ok bool, args *RequestVoteArgs, repl
 	if ok {
 		if reply.Term > rf.currentTerm {
 			rf.becomeFollower(reply.Term)
+			rf.resetElectionTimeout()
 		} else if args.Term == rf.currentTerm && reply.VoteGranted {
 			if rf.role == roleCandidate {
 				rf.voteFrom[p.id] = true
@@ -420,11 +419,6 @@ func (rf *Raft) AppendEntrys(args *RequestAppendEntrysArgs, reply *RequestAppend
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 
-	/*if args.LeaderId == rf.leader && args.PrevLogIndex < rf.commitIndex {
-		//相同leader,entry已经commit,判定为已经处理过的包的复现
-		return
-	}*/
-
 	if args.Term < rf.currentTerm {
 		reply.Term = rf.currentTerm
 		reply.Success = false
@@ -432,6 +426,7 @@ func (rf *Raft) AppendEntrys(args *RequestAppendEntrysArgs, reply *RequestAppend
 	} else if args.Term > rf.currentTerm {
 		//任何情况下发现更大的term,立刻更新term,并转换成follower
 		rf.becomeFollower(args.Term)
+		rf.resetElectionTimeout()
 	} else {
 		if rf.role == roleLeader {
 			reply.Success = false
@@ -439,9 +434,8 @@ func (rf *Raft) AppendEntrys(args *RequestAppendEntrysArgs, reply *RequestAppend
 			return
 		} else if rf.role == roleCandidate {
 			rf.becomeFollower(args.Term)
-		} else {
-			rf.resetElectionTimeout()
 		}
+		rf.resetElectionTimeout()
 	}
 
 	preEntry := rf.getEntryByIndex(args.PrevLogIndex)
@@ -575,6 +569,7 @@ func (rf *Raft) onAppendEntrysReply(p *peer, ok bool, args *RequestAppendEntrysA
 		if reply.Term > rf.currentTerm {
 			//found large term,become follower
 			rf.becomeFollower(reply.Term)
+			rf.resetElectionTimeout()
 		} else {
 
 			if rf.currentTerm != args.Term {
@@ -713,7 +708,6 @@ func (rf *Raft) becomeFollower(term int) {
 
 	logger.Infoln("server:", rf.me, "becomeFollower at term", term)
 
-	rf.resetElectionTimeout()
 	rf.updateRole(roleFollower)
 	rf.updateTerm(term)
 	rf.leader = -1
@@ -724,7 +718,6 @@ func (rf *Raft) becomeFollower(term int) {
 
 func (rf *Raft) becomeCandidate() {
 
-	rf.resetElectionTimeout()
 	rf.updateRole(roleCandidate)
 	rf.leader = -1
 	rf.currentTerm++
@@ -864,6 +857,7 @@ func (rf *Raft) tick() {
 			panic("leader should not run electionTimeout")
 		} else {
 			rf.becomeCandidate()
+			rf.resetElectionTimeout()
 		}
 		return
 	}
@@ -887,6 +881,7 @@ func (rf *Raft) mainRoutine() {
 		rf.mu.Lock()
 		defer rf.mu.Unlock()
 		rf.becomeFollower(rf.currentTerm)
+		rf.resetElectionTimeout()
 	}()
 
 	tickChan := make(chan struct{}, 1)

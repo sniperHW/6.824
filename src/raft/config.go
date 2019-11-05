@@ -235,7 +235,7 @@ func (cfg *config) cleanup() {
 
 // attach server i to the net.
 func (cfg *config) connect(i int) {
-	//fmt.Printf("connect(%d)\n", i)
+	fmt.Println("server:", i, "connect")
 
 	cfg.connected[i] = true
 
@@ -243,7 +243,6 @@ func (cfg *config) connect(i int) {
 	for j := 0; j < cfg.n; j++ {
 		if cfg.connected[j] {
 			endname := cfg.endnames[i][j]
-			//fmt.Println(i, "enable outgoing", j)
 			cfg.net.Enable(endname, true)
 		}
 	}
@@ -252,7 +251,6 @@ func (cfg *config) connect(i int) {
 	for j := 0; j < cfg.n; j++ {
 		if cfg.connected[j] {
 			endname := cfg.endnames[j][i]
-			//fmt.Println(i, "enable incoming", j)
 			cfg.net.Enable(endname, true)
 		}
 	}
@@ -260,7 +258,7 @@ func (cfg *config) connect(i int) {
 
 // detach server i from the net.
 func (cfg *config) disconnect(i int) {
-	//fmt.Printf("disconnect(%d)\n", i)
+	fmt.Println("server:", i, "disconnect")
 
 	cfg.connected[i] = false
 
