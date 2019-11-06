@@ -73,12 +73,6 @@ var (
 	roleFollower  = 3
 )
 
-type peerMsg struct {
-	svcMeth string
-	args    interface{}
-	reply   interface{}
-}
-
 type peer struct {
 	id              int
 	mu              sync.RWMutex
@@ -572,7 +566,8 @@ func (rf *Raft) onAppendEntrysReply(p *peer, ok bool, args *RequestAppendEntrysA
 			rf.resetElectionTimeout()
 		} else {
 
-			if rf.currentTerm != args.Term {
+			if rf.currentTerm != args.Term || args.PrevLogIndex != p.nextIndex-1 {
+				//过期消息
 				return
 			}
 
@@ -603,6 +598,8 @@ func (rf *Raft) onAppendEntrysReply(p *peer, ok bool, args *RequestAppendEntrysA
 				} else {
 
 					logger.Debugln("server:", rf.me, "onAppendEntrysReply failed from", p.id, "reply.Term", reply.Term, "nextIndex", p.nextIndex)
+
+					p.match = false
 
 					//follower与leader不匹配，需要调整nextIndex重试
 					p.nextIndex = 1 //args.PrevLogIndex
