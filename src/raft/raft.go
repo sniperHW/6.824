@@ -661,13 +661,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 		return index, term, false
 	}
 
-	index = 1
-
-	lastEntry := rf.getLastEntry()
-
-	if nil != lastEntry {
-		index = lastEntry.Index + 1
-	}
+	index = len(rf.log)
 
 	term = rf.currentTerm
 
@@ -791,6 +785,23 @@ func (rf *Raft) clearElectionTimeout() {
 }
 
 func (rf *Raft) prepareAppendEntriesRequest(p *peer) *RequestAppendEntrysArgs {
+
+	lastEntry := rf.getLastEntry()
+	if nil != lastEntry {
+		//之前term的entry尚未commit,添加一个空entry,把前面的entry间接commited
+		if lastEntry.Index != rf.commitIndex && lastEntry.Term != rf.currentTerm {
+			entry := logEntry{
+				Index:   len(rf.log),
+				Term:    rf.currentTerm,
+				Command: -1, //不允许applynil,填个0吧
+			}
+
+			rf.log = append(rf.log, entry)
+
+			rf.persist()
+		}
+	}
+
 	if p.nextIndex >= len(rf.log) {
 		//没有entry需要复制，发送心跳
 
@@ -800,7 +811,6 @@ func (rf *Raft) prepareAppendEntriesRequest(p *peer) *RequestAppendEntrysArgs {
 			LeaderCommit: rf.commitIndex,
 		}
 
-		lastEntry := rf.getLastEntry()
 		if nil != lastEntry {
 			request.PrevLogIndex = lastEntry.Index
 			request.PrevLogTerm = lastEntry.Term
