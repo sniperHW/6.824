@@ -49,6 +49,7 @@ var logger golog.LoggerI
 func init() {
 	outLogger := golog.NewOutputLogger("log", "raft", 1024*1024*1000)
 	logger = golog.New("raft", outLogger)
+	logger.SetLevelByString("error")
 }
 
 //
@@ -787,20 +788,22 @@ func (rf *Raft) clearElectionTimeout() {
 func (rf *Raft) prepareAppendEntriesRequest(p *peer) *RequestAppendEntrysArgs {
 
 	lastEntry := rf.getLastEntry()
-	if nil != lastEntry {
-		//之前term的entry尚未commit,添加一个空entry,把前面的entry间接commited
-		if lastEntry.Index != rf.commitIndex && lastEntry.Term != rf.currentTerm {
-			entry := logEntry{
-				Index:   len(rf.log),
-				Term:    rf.currentTerm,
-				Command: -1, //不允许applynil,填个0吧
-			}
 
-			rf.log = append(rf.log, entry)
-
-			rf.persist()
-		}
-	}
+	//	  不能加，否则在某些情况下会违背TestFailNoAgree2B if index2 < 2 || index2 > 3 {的期望导致用例FAIL
+	//		if nil != lastEntry {
+	//			//之前term的entry尚未commit,添加一个空entry,把前面的entry间接commited
+	//			if lastEntry.Index != rf.commitIndex && lastEntry.Term != rf.currentTerm {
+	//				entry := logEntry{
+	//					Index:   len(rf.log),
+	//					Term:    rf.currentTerm,
+	//					Command: -1, //不允许applynil,填个0吧
+	//				}
+	//
+	//					rf.log = append(rf.log, entry)
+	//
+	//					rf.persist()
+	//				}
+	//			}
 
 	if p.nextIndex >= len(rf.log) {
 		//没有entry需要复制，发送心跳
