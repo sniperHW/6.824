@@ -589,6 +589,8 @@ func (rf *Raft) onAppendEntrysReply(p *peer, ok bool, args *RequestAppendEntrysA
 								logger.Debugln("server:", rf.me, "leader commit", rf.commitIndex)
 							}
 						}
+					} else {
+						p.matchIndex = args.PrevLogIndex
 					}
 
 					if p.nextIndex != len(rf.log) {
