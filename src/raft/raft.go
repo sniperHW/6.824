@@ -896,15 +896,14 @@ func (rf *Raft) mainRoutine() {
 		rf.resetElectionTimeout()
 	}()
 
-	tickChan := make(chan struct{}, 1)
-	ticker := time.AfterFunc(time.Millisecond*10, func() {
-		select {
-		case tickChan <- struct{}{}:
-		default:
+	var ticker *time.Timer
+	ticker = time.AfterFunc(time.Millisecond*10, func() {
+		rf.mainCh <- func() {
+			rf.tick()
+			ticker.Reset(time.Millisecond * 10)
 		}
 	})
 
-	//ticker := time.NewTimer(time.Millisecond * 10)
 	defer ticker.Stop()
 
 	for {
@@ -913,9 +912,6 @@ func (rf *Raft) mainRoutine() {
 			e.(func())()
 		case <-rf.stopCh:
 			goto EndMainRountine
-		case <-tickChan:
-			rf.tick()
-			ticker.Reset(time.Millisecond * 10)
 		}
 	}
 
