@@ -1,11 +1,12 @@
 package raftkv
 
 import (
-	"labgob"
-	"labrpc"
 	"log"
-	"raft"
 	"sync"
+
+	"github.com/sniperHW/6.824/src/labgob"
+	"github.com/sniperHW/6.824/src/labrpc"
+	"github.com/sniperHW/6.824/src/raft"
 )
 
 const Debug = 0
@@ -42,18 +43,15 @@ func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 	// Your code here.
 }
 
-//
 // the tester calls Kill() when a KVServer instance won't
 // be needed again. you are not required to do anything
 // in Kill(), but it might be convenient to (for example)
 // turn off debug output from this instance.
-//
 func (kv *KVServer) Kill() {
 	kv.rf.Kill()
 	// Your code here, if desired.
 }
 
-//
 // servers[] contains the ports of the set of
 // servers that will cooperate via Raft to
 // form the fault-tolerant key/value service.
@@ -66,7 +64,6 @@ func (kv *KVServer) Kill() {
 // you don't need to snapshot.
 // StartKVServer() must return quickly, so it should start goroutines
 // for any long-running work.
-//
 func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister, maxraftstate int) *KVServer {
 	// call labgob.Register on structures you want
 	// Go's RPC library to marshall/unmarshall.
